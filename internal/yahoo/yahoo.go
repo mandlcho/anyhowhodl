@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sync"
 	"time"
 )
 
@@ -15,20 +16,20 @@ type Quote struct {
 	MarketState   string
 }
 
-type quoteResponse struct {
-	QuoteResponse struct {
+type chartResponse struct {
+	Chart struct {
 		Result []struct {
-			Symbol             string  `json:"symbol"`
-			RegularMarketPrice float64 `json:"regularMarketPrice"`
-			RegularMarketChange float64 `json:"regularMarketChange"`
-			RegularMarketChangePercent float64 `json:"regularMarketChangePercent"`
-			MarketState        string  `json:"marketState"`
+			Meta struct {
+				Symbol             string  `json:"symbol"`
+				RegularMarketPrice float64 `json:"regularMarketPrice"`
+				ChartPreviousClose float64 `json:"chartPreviousClose"`
+			} `json:"meta"`
 		} `json:"result"`
 		Error *struct {
 			Code        string `json:"code"`
 			Description string `json:"description"`
 		} `json:"error"`
-	} `json:"quoteResponse"`
+	} `json:"chart"`
 }
 
 type Client struct {
@@ -48,16 +49,29 @@ func (c *Client) GetQuotes(symbols []string) (map[string]Quote, error) {
 		return make(map[string]Quote), nil
 	}
 
-	// Build comma-separated symbol list
-	symbolList := ""
-	for i, s := range symbols {
-		if i > 0 {
-			symbolList += ","
-		}
-		symbolList += s
+	quotes := make(map[string]Quote)
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+
+	for _, symbol := range symbols {
+		wg.Add(1)
+		go func(sym string) {
+			defer wg.Done()
+			quote, err := c.fetchQuote(sym)
+			if err == nil && quote != nil {
+				mu.Lock()
+				quotes[sym] = *quote
+				mu.Unlock()
+			}
+		}(symbol)
 	}
 
-	url := fmt.Sprintf("https://query1.finance.yahoo.com/v7/finance/quote?symbols=%s", symbolList)
+	wg.Wait()
+	return quotes, nil
+}
+
+func (c *Client) fetchQuote(symbol string) (*Quote, error) {
+	url := fmt.Sprintf("https://query1.finance.yahoo.com/v8/finance/chart/%s?interval=1d&range=1d", symbol)
 
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
@@ -76,36 +90,34 @@ func (c *Client) GetQuotes(symbols []string) (map[string]Quote, error) {
 		return nil, fmt.Errorf("yahoo API returned status %d", resp.StatusCode)
 	}
 
-	var qr quoteResponse
-	if err := json.NewDecoder(resp.Body).Decode(&qr); err != nil {
+	var cr chartResponse
+	if err := json.NewDecoder(resp.Body).Decode(&cr); err != nil {
 		return nil, err
 	}
 
-	if qr.QuoteResponse.Error != nil {
-		return nil, fmt.Errorf("yahoo API error: %s", qr.QuoteResponse.Error.Description)
+	if cr.Chart.Error != nil {
+		return nil, fmt.Errorf("yahoo API error: %s", cr.Chart.Error.Description)
 	}
 
-	quotes := make(map[string]Quote)
-	for _, r := range qr.QuoteResponse.Result {
-		quotes[r.Symbol] = Quote{
-			Symbol:        r.Symbol,
-			Price:         r.RegularMarketPrice,
-			Change:        r.RegularMarketChange,
-			ChangePercent: r.RegularMarketChangePercent,
-			MarketState:   r.MarketState,
-		}
+	if len(cr.Chart.Result) == 0 {
+		return nil, fmt.Errorf("no data for symbol %s", symbol)
 	}
 
-	return quotes, nil
+	meta := cr.Chart.Result[0].Meta
+	change := meta.RegularMarketPrice - meta.ChartPreviousClose
+	changePercent := 0.0
+	if meta.ChartPreviousClose > 0 {
+		changePercent = (change / meta.ChartPreviousClose) * 100
+	}
+
+	return &Quote{
+		Symbol:        meta.Symbol,
+		Price:         meta.RegularMarketPrice,
+		Change:        change,
+		ChangePercent: changePercent,
+	}, nil
 }
 
 func (c *Client) GetQuote(symbol string) (*Quote, error) {
-	quotes, err := c.GetQuotes([]string{symbol})
-	if err != nil {
-		return nil, err
-	}
-	if q, ok := quotes[symbol]; ok {
-		return &q, nil
-	}
-	return nil, fmt.Errorf("no quote found for %s", symbol)
+	return c.fetchQuote(symbol)
 }

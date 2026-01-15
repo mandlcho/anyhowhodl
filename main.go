@@ -65,7 +65,8 @@ func (a *App) run() {
 		SetBorders(true).
 		SetSelectable(true, false).
 		SetFixed(1, 0).
-		SetSeparator(' ')
+		SetSeparator(' ').
+		SetSelectedStyle(tcell.StyleDefault.Background(tcell.ColorDarkSlateGray))
 
 	a.table.SetSelectedFunc(func(row, column int) {
 		if row > 0 && row <= len(a.holdings) {
@@ -195,21 +196,27 @@ func (a *App) updateTable() {
 	for i, h := range a.holdings {
 		row := i + 1
 
+		// Row background
+		rowBg := tcell.ColorBlack
+
 		// Ticker - magenta/purple for visibility
 		a.table.SetCell(row, 0, tview.NewTableCell(" "+h.Ticker+" ").
 			SetTextColor(tcell.ColorFuchsia).
+			SetBackgroundColor(rowBg).
 			SetAlign(tview.AlignLeft).
 			SetExpansion(1))
 
 		// Quantity
 		a.table.SetCell(row, 1, tview.NewTableCell(" "+formatNumber(h.Quantity.StringFixed(2))+" ").
 			SetTextColor(tcell.ColorWhite).
+			SetBackgroundColor(rowBg).
 			SetAlign(tview.AlignLeft).
 			SetExpansion(1))
 
 		// Avg Cost
 		a.table.SetCell(row, 2, tview.NewTableCell(" $"+formatNumber(h.AvgCost.StringFixed(2))+" ").
 			SetTextColor(tcell.ColorWhite).
+			SetBackgroundColor(rowBg).
 			SetAlign(tview.AlignLeft).
 			SetExpansion(1))
 
@@ -230,12 +237,14 @@ func (a *App) updateTable() {
 			// Price - cyan
 			a.table.SetCell(row, 3, tview.NewTableCell(" $"+formatNumber(price.StringFixed(2))+" ").
 				SetTextColor(tcell.ColorAqua).
+				SetBackgroundColor(rowBg).
 				SetAlign(tview.AlignLeft).
 				SetExpansion(1))
 
 			// Value - yellow
 			a.table.SetCell(row, 4, tview.NewTableCell(" $"+formatNumber(value.StringFixed(2))+" ").
 				SetTextColor(tcell.ColorYellow).
+				SetBackgroundColor(rowBg).
 				SetAlign(tview.AlignLeft).
 				SetExpansion(1))
 
@@ -252,6 +261,7 @@ func (a *App) updateTable() {
 			}
 			a.table.SetCell(row, 5, tview.NewTableCell(" "+plSign+"$"+formatNumber(pl.StringFixed(2))+" ").
 				SetTextColor(plColor).
+				SetBackgroundColor(rowBg).
 				SetAlign(tview.AlignLeft).
 				SetExpansion(1))
 
@@ -262,14 +272,15 @@ func (a *App) updateTable() {
 			}
 			a.table.SetCell(row, 6, tview.NewTableCell(" "+pctSign+formatNumber(plPct.StringFixed(2))+"% ").
 				SetTextColor(plColor).
+				SetBackgroundColor(rowBg).
 				SetAlign(tview.AlignLeft).
 				SetExpansion(1))
 		} else {
 			totalValue = totalValue.Add(costBasis)
-			a.table.SetCell(row, 3, tview.NewTableCell(" - ").SetAlign(tview.AlignLeft).SetExpansion(1))
-			a.table.SetCell(row, 4, tview.NewTableCell(" - ").SetAlign(tview.AlignLeft).SetExpansion(1))
-			a.table.SetCell(row, 5, tview.NewTableCell(" - ").SetAlign(tview.AlignLeft).SetExpansion(1))
-			a.table.SetCell(row, 6, tview.NewTableCell(" - ").SetAlign(tview.AlignLeft).SetExpansion(1))
+			a.table.SetCell(row, 3, tview.NewTableCell(" - ").SetBackgroundColor(rowBg).SetAlign(tview.AlignLeft).SetExpansion(1))
+			a.table.SetCell(row, 4, tview.NewTableCell(" - ").SetBackgroundColor(rowBg).SetAlign(tview.AlignLeft).SetExpansion(1))
+			a.table.SetCell(row, 5, tview.NewTableCell(" - ").SetBackgroundColor(rowBg).SetAlign(tview.AlignLeft).SetExpansion(1))
+			a.table.SetCell(row, 6, tview.NewTableCell(" - ").SetBackgroundColor(rowBg).SetAlign(tview.AlignLeft).SetExpansion(1))
 		}
 	}
 
@@ -308,6 +319,16 @@ func (a *App) showAddForm() {
 		AddInputField("Avg Cost ($)", "", 15, nil, nil).
 		AddInputField("Entry Date (YYYY-MM-DD)", time.Now().Format("2006-01-02"), 15, nil, nil).
 		AddInputField("Notes", "", 30, nil, nil)
+
+	// Style the form
+	form.SetBackgroundColor(tcell.ColorBlack)
+	form.SetFieldBackgroundColor(tcell.ColorDarkSlateGray)
+	form.SetFieldTextColor(tcell.ColorWhite)
+	form.SetLabelColor(tcell.ColorTeal)
+	form.SetButtonBackgroundColor(tcell.ColorTeal)
+	form.SetButtonTextColor(tcell.ColorBlack)
+	form.SetBorderColor(tcell.ColorTeal)
+	form.SetTitleColor(tcell.ColorTeal)
 
 	form.AddButton("Save", func() {
 		ticker := strings.ToUpper(form.GetFormItem(0).(*tview.InputField).GetText())
@@ -398,6 +419,16 @@ func (a *App) showEditForm(index int) {
 		AddInputField("Quantity", h.Quantity.String(), 15, nil, nil).
 		AddInputField("Avg Cost ($)", h.AvgCost.String(), 15, nil, nil).
 		AddInputField("Notes", h.Notes, 30, nil, nil)
+
+	// Style the form
+	form.SetBackgroundColor(tcell.ColorBlack)
+	form.SetFieldBackgroundColor(tcell.ColorDarkSlateGray)
+	form.SetFieldTextColor(tcell.ColorWhite)
+	form.SetLabelColor(tcell.ColorTeal)
+	form.SetButtonBackgroundColor(tcell.ColorTeal)
+	form.SetButtonTextColor(tcell.ColorBlack)
+	form.SetBorderColor(tcell.ColorTeal)
+	form.SetTitleColor(tcell.ColorTeal)
 
 	form.AddButton("Save", func() {
 		qtyStr := form.GetFormItem(0).(*tview.InputField).GetText()
