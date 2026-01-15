@@ -62,9 +62,10 @@ func (a *App) run() {
 
 	// Create main table
 	a.table = tview.NewTable().
-		SetBorders(false).
+		SetBorders(true).
 		SetSelectable(true, false).
-		SetFixed(1, 0)
+		SetFixed(1, 0).
+		SetSeparator(' ')
 
 	a.table.SetSelectedFunc(func(row, column int) {
 		if row > 0 && row <= len(a.holdings) {
@@ -83,9 +84,9 @@ func (a *App) run() {
 	// Main layout
 	mainFlex := tview.NewFlex().
 		SetDirection(tview.FlexRow).
-		AddItem(a.createHeader(), 3, 0, false).
+		AddItem(a.createHeader(), 8, 0, false).
 		AddItem(a.table, 0, 1, true).
-		AddItem(a.summary, 3, 0, false).
+		AddItem(a.summary, 2, 0, false).
 		AddItem(a.statusBar, 1, 0, false)
 
 	a.pages = tview.NewPages().
@@ -122,10 +123,17 @@ func (a *App) run() {
 }
 
 func (a *App) createHeader() *tview.TextView {
+	ascii := `
+   [teal]█████╗ ███╗   ██╗██╗   ██╗██╗  ██╗ ██████╗ ██╗    ██╗██╗  ██╗ ██████╗ ██████╗ ██╗
+  ██╔══██╗████╗  ██║╚██╗ ██╔╝██║  ██║██╔═══██╗██║    ██║██║  ██║██╔═══██╗██╔══██╗██║
+  ███████║██╔██╗ ██║ ╚████╔╝ ███████║██║   ██║██║ █╗ ██║███████║██║   ██║██║  ██║██║
+  ██╔══██║██║╚██╗██║  ╚██╔╝  ██╔══██║██║   ██║██║███╗██║██╔══██║██║   ██║██║  ██║██║
+  ██║  ██║██║ ╚████║   ██║   ██║  ██║╚██████╔╝╚███╔███╔╝██║  ██║╚██████╔╝██████╔╝███████╗
+  ╚═╝  ╚═╝╚═╝  ╚═══╝   ╚═╝   ╚═╝  ╚═╝ ╚═════╝  ╚══╝╚══╝ ╚═╝  ╚═╝ ╚═════╝ ╚═════╝ ╚══════╝[-]`
 	header := tview.NewTextView().
 		SetDynamicColors(true).
-		SetTextAlign(tview.AlignCenter).
-		SetText("\n[green::b]ANYHOWHODL[white] - Portfolio Tracker")
+		SetTextAlign(tview.AlignLeft).
+		SetText(ascii)
 	return header
 }
 
@@ -170,16 +178,15 @@ func (a *App) refreshData() {
 func (a *App) updateTable() {
 	a.table.Clear()
 
-	// Header row
-	headers := []string{"TICKER", "QTY", "AVG COST", "PRICE", "VALUE", "P/L", "P/L %", "DAY CHG"}
+	// Header row - cyan color scheme
+	headers := []string{"TICKER", "QTY", "AVG COST", "PRICE", "VALUE", "P/L", "P/L %"}
 	for i, h := range headers {
-		cell := tview.NewTableCell(h).
-			SetTextColor(tcell.ColorYellow).
-			SetAlign(tview.AlignRight).
-			SetSelectable(false)
-		if i == 0 {
-			cell.SetAlign(tview.AlignLeft)
-		}
+		cell := tview.NewTableCell(" "+h+" ").
+			SetTextColor(tcell.ColorBlack).
+			SetBackgroundColor(tcell.ColorTeal).
+			SetAlign(tview.AlignLeft).
+			SetSelectable(false).
+			SetExpansion(1)
 		a.table.SetCell(0, i, cell)
 	}
 
@@ -188,17 +195,23 @@ func (a *App) updateTable() {
 	for i, h := range a.holdings {
 		row := i + 1
 
-		// Ticker
-		a.table.SetCell(row, 0, tview.NewTableCell(h.Ticker).
-			SetAlign(tview.AlignLeft))
+		// Ticker - magenta/purple for visibility
+		a.table.SetCell(row, 0, tview.NewTableCell(" "+h.Ticker+" ").
+			SetTextColor(tcell.ColorFuchsia).
+			SetAlign(tview.AlignLeft).
+			SetExpansion(1))
 
 		// Quantity
-		a.table.SetCell(row, 1, tview.NewTableCell(h.Quantity.StringFixed(2)).
-			SetAlign(tview.AlignRight))
+		a.table.SetCell(row, 1, tview.NewTableCell(" "+formatNumber(h.Quantity.StringFixed(2))+" ").
+			SetTextColor(tcell.ColorWhite).
+			SetAlign(tview.AlignLeft).
+			SetExpansion(1))
 
 		// Avg Cost
-		a.table.SetCell(row, 2, tview.NewTableCell("$"+h.AvgCost.StringFixed(2)).
-			SetAlign(tview.AlignRight))
+		a.table.SetCell(row, 2, tview.NewTableCell(" $"+formatNumber(h.AvgCost.StringFixed(2))+" ").
+			SetTextColor(tcell.ColorWhite).
+			SetAlign(tview.AlignLeft).
+			SetExpansion(1))
 
 		quote, hasQuote := a.quotes[h.Ticker]
 		costBasis := h.Quantity.Mul(h.AvgCost)
@@ -214,18 +227,22 @@ func (a *App) updateTable() {
 				plPct = pl.Div(costBasis).Mul(decimal.NewFromInt(100))
 			}
 
-			// Price
-			a.table.SetCell(row, 3, tview.NewTableCell("$"+price.StringFixed(2)).
-				SetAlign(tview.AlignRight))
+			// Price - cyan
+			a.table.SetCell(row, 3, tview.NewTableCell(" $"+formatNumber(price.StringFixed(2))+" ").
+				SetTextColor(tcell.ColorAqua).
+				SetAlign(tview.AlignLeft).
+				SetExpansion(1))
 
-			// Value
-			a.table.SetCell(row, 4, tview.NewTableCell("$"+value.StringFixed(2)).
-				SetAlign(tview.AlignRight))
+			// Value - yellow
+			a.table.SetCell(row, 4, tview.NewTableCell(" $"+formatNumber(value.StringFixed(2))+" ").
+				SetTextColor(tcell.ColorYellow).
+				SetAlign(tview.AlignLeft).
+				SetExpansion(1))
 
 			// P/L
 			plColor := tcell.ColorWhite
 			if pl.IsPositive() {
-				plColor = tcell.ColorGreen
+				plColor = tcell.ColorLime
 			} else if pl.IsNegative() {
 				plColor = tcell.ColorRed
 			}
@@ -233,40 +250,26 @@ func (a *App) updateTable() {
 			if pl.IsPositive() {
 				plSign = "+"
 			}
-			a.table.SetCell(row, 5, tview.NewTableCell(plSign+"$"+pl.StringFixed(2)).
+			a.table.SetCell(row, 5, tview.NewTableCell(" "+plSign+"$"+formatNumber(pl.StringFixed(2))+" ").
 				SetTextColor(plColor).
-				SetAlign(tview.AlignRight))
+				SetAlign(tview.AlignLeft).
+				SetExpansion(1))
 
 			// P/L %
 			pctSign := ""
 			if plPct.IsPositive() {
 				pctSign = "+"
 			}
-			a.table.SetCell(row, 6, tview.NewTableCell(pctSign+plPct.StringFixed(2)+"%").
+			a.table.SetCell(row, 6, tview.NewTableCell(" "+pctSign+formatNumber(plPct.StringFixed(2))+"% ").
 				SetTextColor(plColor).
-				SetAlign(tview.AlignRight))
-
-			// Day change
-			dayChgColor := tcell.ColorWhite
-			if quote.ChangePercent > 0 {
-				dayChgColor = tcell.ColorGreen
-			} else if quote.ChangePercent < 0 {
-				dayChgColor = tcell.ColorRed
-			}
-			daySign := ""
-			if quote.ChangePercent > 0 {
-				daySign = "+"
-			}
-			a.table.SetCell(row, 7, tview.NewTableCell(fmt.Sprintf("%s%.2f%%", daySign, quote.ChangePercent)).
-				SetTextColor(dayChgColor).
-				SetAlign(tview.AlignRight))
+				SetAlign(tview.AlignLeft).
+				SetExpansion(1))
 		} else {
 			totalValue = totalValue.Add(costBasis)
-			a.table.SetCell(row, 3, tview.NewTableCell("-").SetAlign(tview.AlignRight))
-			a.table.SetCell(row, 4, tview.NewTableCell("-").SetAlign(tview.AlignRight))
-			a.table.SetCell(row, 5, tview.NewTableCell("-").SetAlign(tview.AlignRight))
-			a.table.SetCell(row, 6, tview.NewTableCell("-").SetAlign(tview.AlignRight))
-			a.table.SetCell(row, 7, tview.NewTableCell("-").SetAlign(tview.AlignRight))
+			a.table.SetCell(row, 3, tview.NewTableCell(" - ").SetAlign(tview.AlignLeft).SetExpansion(1))
+			a.table.SetCell(row, 4, tview.NewTableCell(" - ").SetAlign(tview.AlignLeft).SetExpansion(1))
+			a.table.SetCell(row, 5, tview.NewTableCell(" - ").SetAlign(tview.AlignLeft).SetExpansion(1))
+			a.table.SetCell(row, 6, tview.NewTableCell(" - ").SetAlign(tview.AlignLeft).SetExpansion(1))
 		}
 	}
 
@@ -289,10 +292,10 @@ func (a *App) updateTable() {
 		plSign = "+"
 	}
 
-	summaryText := fmt.Sprintf("\n [white]Total: [green]$%s[white]  |  Cost: $%s  |  P/L: %s%s$%s (%s%.2f%%)",
-		totalValue.StringFixed(2),
-		totalCost.StringFixed(2),
-		plColor, plSign, totalPL.Abs().StringFixed(2),
+	summaryText := fmt.Sprintf(" [white]Total: [yellow]$%s[white]  |  Cost: $%s  |  P/L: %s%s$%s (%s%.2f%%)",
+		formatNumber(totalValue.StringFixed(2)),
+		formatNumber(totalCost.StringFixed(2)),
+		plColor, plSign, formatNumber(totalPL.Abs().StringFixed(2)),
 		plSign, totalPLPct.InexactFloat64())
 
 	a.summary.SetText(summaryText)
