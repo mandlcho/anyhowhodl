@@ -1,0 +1,14 @@
+# Binary
+anyhowhodl
+
+# Environment file with secrets
+.env
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
