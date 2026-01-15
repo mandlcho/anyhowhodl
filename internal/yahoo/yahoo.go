@@ -9,11 +9,13 @@ import (
 )
 
 type Quote struct {
-	Symbol        string
-	Price         float64
-	Change        float64
-	ChangePercent float64
-	MarketState   string
+	Symbol          string
+	Price           float64
+	Change          float64
+	ChangePercent   float64
+	MarketState     string
+	FiftyTwoWeekHigh float64
+	PctFromHigh     float64
 }
 
 type chartResponse struct {
@@ -23,6 +25,7 @@ type chartResponse struct {
 				Symbol             string  `json:"symbol"`
 				RegularMarketPrice float64 `json:"regularMarketPrice"`
 				ChartPreviousClose float64 `json:"chartPreviousClose"`
+				FiftyTwoWeekHigh   float64 `json:"fiftyTwoWeekHigh"`
 			} `json:"meta"`
 		} `json:"result"`
 		Error *struct {
@@ -110,11 +113,18 @@ func (c *Client) fetchQuote(symbol string) (*Quote, error) {
 		changePercent = (change / meta.ChartPreviousClose) * 100
 	}
 
+	pctFromHigh := 0.0
+	if meta.FiftyTwoWeekHigh > 0 {
+		pctFromHigh = ((meta.RegularMarketPrice - meta.FiftyTwoWeekHigh) / meta.FiftyTwoWeekHigh) * 100
+	}
+
 	return &Quote{
-		Symbol:        meta.Symbol,
-		Price:         meta.RegularMarketPrice,
-		Change:        change,
-		ChangePercent: changePercent,
+		Symbol:           meta.Symbol,
+		Price:            meta.RegularMarketPrice,
+		Change:           change,
+		ChangePercent:    changePercent,
+		FiftyTwoWeekHigh: meta.FiftyTwoWeekHigh,
+		PctFromHigh:      pctFromHigh,
 	}, nil
 }
 

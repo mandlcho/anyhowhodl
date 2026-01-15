@@ -124,16 +124,16 @@ func (a *App) run() {
 }
 
 func (a *App) createHeader() *tview.TextView {
-	ascii := `
-   [teal]█████╗ ███╗   ██╗██╗   ██╗██╗  ██╗ ██████╗ ██╗    ██╗██╗  ██╗ ██████╗ ██████╗ ██╗
-  ██╔══██╗████╗  ██║╚██╗ ██╔╝██║  ██║██╔═══██╗██║    ██║██║  ██║██╔═══██╗██╔══██╗██║
-  ███████║██╔██╗ ██║ ╚████╔╝ ███████║██║   ██║██║ █╗ ██║███████║██║   ██║██║  ██║██║
-  ██╔══██║██║╚██╗██║  ╚██╔╝  ██╔══██║██║   ██║██║███╗██║██╔══██║██║   ██║██║  ██║██║
-  ██║  ██║██║ ╚████║   ██║   ██║  ██║╚██████╔╝╚███╔███╔╝██║  ██║╚██████╔╝██████╔╝███████╗
-  ╚═╝  ╚═╝╚═╝  ╚═══╝   ╚═╝   ╚═╝  ╚═╝ ╚═════╝  ╚══╝╚══╝ ╚═╝  ╚═╝ ╚═════╝ ╚═════╝ ╚══════╝[-]`
+	ascii := "\n[teal::b]" +
+		" █████╗ ███╗   ██╗██╗   ██╗██╗  ██╗ ██████╗ ██╗    ██╗██╗  ██╗ ██████╗ ██████╗ ██╗     \n" +
+		"██╔══██╗████╗  ██║╚██╗ ██╔╝██║  ██║██╔═══██╗██║    ██║██║  ██║██╔═══██╗██╔══██╗██║     \n" +
+		"███████║██╔██╗ ██║ ╚████╔╝ ███████║██║   ██║██║ █╗ ██║███████║██║   ██║██║  ██║██║     \n" +
+		"██╔══██║██║╚██╗██║  ╚██╔╝  ██╔══██║██║   ██║██║███╗██║██╔══██║██║   ██║██║  ██║██║     \n" +
+		"██║  ██║██║ ╚████║   ██║   ██║  ██║╚██████╔╝╚███╔███╔╝██║  ██║╚██████╔╝██████╔╝███████╗\n" +
+		"╚═╝  ╚═╝╚═╝  ╚═══╝   ╚═╝   ╚═╝  ╚═╝ ╚═════╝  ╚══╝╚══╝ ╚═╝  ╚═╝ ╚═════╝ ╚═════╝ ╚══════╝[-:-:-]"
 	header := tview.NewTextView().
 		SetDynamicColors(true).
-		SetTextAlign(tview.AlignLeft).
+		SetTextAlign(tview.AlignCenter).
 		SetText(ascii)
 	return header
 }
@@ -180,7 +180,7 @@ func (a *App) updateTable() {
 	a.table.Clear()
 
 	// Header row - cyan color scheme
-	headers := []string{"TICKER", "QTY", "AVG COST", "PRICE", "VALUE", "P/L", "P/L %"}
+	headers := []string{"TICKER", "QTY", "AVG COST", "PRICE", "VALUE", "P/L", "P/L %", "WEIGHT", "vs HIGH"}
 	for i, h := range headers {
 		cell := tview.NewTableCell(" "+h+" ").
 			SetTextColor(tcell.ColorBlack).
@@ -191,12 +191,29 @@ func (a *App) updateTable() {
 		a.table.SetCell(0, i, cell)
 	}
 
+	// First pass: calculate total portfolio value
 	var totalCost, totalValue decimal.Decimal
+	positionValues := make([]decimal.Decimal, len(a.holdings))
 
 	for i, h := range a.holdings {
-		row := i + 1
+		quote, hasQuote := a.quotes[h.Ticker]
+		costBasis := h.Quantity.Mul(h.AvgCost)
+		totalCost = totalCost.Add(costBasis)
 
-		// Row background
+		if hasQuote {
+			price := decimal.NewFromFloat(quote.Price)
+			value := h.Quantity.Mul(price)
+			positionValues[i] = value
+			totalValue = totalValue.Add(value)
+		} else {
+			positionValues[i] = costBasis
+			totalValue = totalValue.Add(costBasis)
+		}
+	}
+
+	// Second pass: populate table with weight %
+	for i, h := range a.holdings {
+		row := i + 1
 		rowBg := tcell.ColorBlack
 
 		// Ticker - magenta/purple for visibility
@@ -222,12 +239,16 @@ func (a *App) updateTable() {
 
 		quote, hasQuote := a.quotes[h.Ticker]
 		costBasis := h.Quantity.Mul(h.AvgCost)
-		totalCost = totalCost.Add(costBasis)
+		value := positionValues[i]
+
+		// Calculate weight
+		weight := decimal.Zero
+		if !totalValue.IsZero() {
+			weight = value.Div(totalValue).Mul(decimal.NewFromInt(100))
+		}
 
 		if hasQuote {
 			price := decimal.NewFromFloat(quote.Price)
-			value := h.Quantity.Mul(price)
-			totalValue = totalValue.Add(value)
 			pl := value.Sub(costBasis)
 			plPct := decimal.Zero
 			if !costBasis.IsZero() {
@@ -275,12 +296,42 @@ func (a *App) updateTable() {
 				SetBackgroundColor(rowBg).
 				SetAlign(tview.AlignLeft).
 				SetExpansion(1))
+
+			// Weight % - orange if > 25%, red if > 40%
+			weightColor := tcell.ColorWhite
+			if weight.GreaterThan(decimal.NewFromInt(40)) {
+				weightColor = tcell.ColorRed
+			} else if weight.GreaterThan(decimal.NewFromInt(25)) {
+				weightColor = tcell.ColorOrange
+			}
+			a.table.SetCell(row, 7, tview.NewTableCell(" "+formatNumber(weight.StringFixed(1))+"% ").
+				SetTextColor(weightColor).
+				SetBackgroundColor(rowBg).
+				SetAlign(tview.AlignLeft).
+				SetExpansion(1))
+
+			// % from 52-week high - green if big dip (buying opportunity)
+			pctFromHigh := quote.PctFromHigh
+			highColor := tcell.ColorWhite
+			highText := fmt.Sprintf(" %.1f%% ", pctFromHigh)
+			if pctFromHigh <= -20 {
+				highColor = tcell.ColorLime // Big dip - potential buy
+				highText = fmt.Sprintf(" %.1f%% DIP ", pctFromHigh)
+			} else if pctFromHigh <= -10 {
+				highColor = tcell.ColorYellow // Moderate dip
+			}
+			a.table.SetCell(row, 8, tview.NewTableCell(highText).
+				SetTextColor(highColor).
+				SetBackgroundColor(rowBg).
+				SetAlign(tview.AlignLeft).
+				SetExpansion(1))
 		} else {
-			totalValue = totalValue.Add(costBasis)
 			a.table.SetCell(row, 3, tview.NewTableCell(" - ").SetBackgroundColor(rowBg).SetAlign(tview.AlignLeft).SetExpansion(1))
 			a.table.SetCell(row, 4, tview.NewTableCell(" - ").SetBackgroundColor(rowBg).SetAlign(tview.AlignLeft).SetExpansion(1))
 			a.table.SetCell(row, 5, tview.NewTableCell(" - ").SetBackgroundColor(rowBg).SetAlign(tview.AlignLeft).SetExpansion(1))
 			a.table.SetCell(row, 6, tview.NewTableCell(" - ").SetBackgroundColor(rowBg).SetAlign(tview.AlignLeft).SetExpansion(1))
+			a.table.SetCell(row, 7, tview.NewTableCell(" "+formatNumber(weight.StringFixed(1))+"% ").SetBackgroundColor(rowBg).SetAlign(tview.AlignLeft).SetExpansion(1))
+			a.table.SetCell(row, 8, tview.NewTableCell(" - ").SetBackgroundColor(rowBg).SetAlign(tview.AlignLeft).SetExpansion(1))
 		}
 	}
 
