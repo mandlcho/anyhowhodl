@@ -329,11 +329,11 @@ func (a *App) updateTable() {
 
 			// % from 52-week high - green if big dip (buying opportunity)
 			pctFromHigh := quote.PctFromHigh
+			highPrice := decimal.NewFromFloat(quote.FiftyTwoWeekHigh)
 			highColor := tcell.ColorWhite
-			highText := fmt.Sprintf(" %.1f%% ", pctFromHigh)
+			highText := fmt.Sprintf(" %.1f%% ($%s) ", pctFromHigh, formatNumber(highPrice.StringFixed(2)))
 			if pctFromHigh <= -20 {
 				highColor = tcell.ColorLime // Big dip - potential buy
-				highText = fmt.Sprintf(" %.1f%% DIP ", pctFromHigh)
 			} else if pctFromHigh <= -10 {
 				highColor = tcell.ColorYellow // Moderate dip
 			}
