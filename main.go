@@ -111,14 +111,14 @@ func (a *App) run() {
 	optionsSection := tview.NewFlex().
 		SetDirection(tview.FlexRow).
 		AddItem(a.optionsTable, 0, 1, false).
-		AddItem(a.timeline, 5, 0, false)
+		AddItem(a.timeline, 3, 0, false)
 
-	// Main layout
+	// Main layout - holdings gets 2x space vs options
 	mainFlex := tview.NewFlex().
 		SetDirection(tview.FlexRow).
 		AddItem(a.createHeader(), 8, 0, false).
-		AddItem(a.table, 0, 1, true).
-		AddItem(optionsSection, 12, 0, false).
+		AddItem(a.table, 0, 2, true).
+		AddItem(optionsSection, 0, 1, false).
 		AddItem(a.summary, 2, 0, false).
 		AddItem(a.statusBar, 1, 0, false)
 
