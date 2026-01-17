@@ -6,10 +6,15 @@ CREATE TABLE IF NOT EXISTS holdings (
     quantity DECIMAL(18, 8) NOT NULL,
     avg_cost DECIMAL(18, 4) NOT NULL,
     entry_date DATE NOT NULL DEFAULT CURRENT_DATE,
+    target_price DECIMAL(18, 4),
     notes TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- Migration: Add target_price column if it doesn't exist
+-- Run this if you already have the table:
+-- ALTER TABLE holdings ADD COLUMN IF NOT EXISTS target_price DECIMAL(18, 4);
 
 -- Index for faster ticker lookups
 CREATE INDEX IF NOT EXISTS idx_holdings_ticker ON holdings(ticker);

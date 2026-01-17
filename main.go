@@ -93,8 +93,14 @@ func (a *App) run() {
 	a.pages = tview.NewPages().
 		AddPage("main", mainFlex, true, true)
 
-	// Key bindings
+	// Key bindings - only active on main page
 	a.app.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		// Only handle shortcuts when on main page
+		name, _ := a.pages.GetFrontPage()
+		if name != "main" {
+			return event
+		}
+
 		switch event.Rune() {
 		case 'q':
 			a.app.Stop()
@@ -180,7 +186,7 @@ func (a *App) updateTable() {
 	a.table.Clear()
 
 	// Header row - cyan color scheme
-	headers := []string{"TICKER", "QTY", "AVG COST", "PRICE", "VALUE", "P/L", "P/L %", "WEIGHT", "vs HIGH"}
+	headers := []string{"TICKER", "QTY", "AVG COST", "PRICE", "VALUE", "P/L", "P/L %", "WEIGHT", "vs HIGH", "SIGNAL"}
 	for i, h := range headers {
 		cell := tview.NewTableCell(" "+h+" ").
 			SetTextColor(tcell.ColorBlack).
@@ -325,6 +331,25 @@ func (a *App) updateTable() {
 				SetBackgroundColor(rowBg).
 				SetAlign(tview.AlignLeft).
 				SetExpansion(1))
+
+			// SIGNAL - based on target price vs current price
+			signalText := " - "
+			signalColor := tcell.ColorWhite
+			if h.TargetPrice.Valid {
+				target := h.TargetPrice.Decimal
+				if price.LessThan(target) {
+					signalText = " BUY "
+					signalColor = tcell.ColorLime
+				} else {
+					signalText = " SELL "
+					signalColor = tcell.ColorRed
+				}
+			}
+			a.table.SetCell(row, 9, tview.NewTableCell(signalText).
+				SetTextColor(signalColor).
+				SetBackgroundColor(rowBg).
+				SetAlign(tview.AlignLeft).
+				SetExpansion(1))
 		} else {
 			a.table.SetCell(row, 3, tview.NewTableCell(" - ").SetBackgroundColor(rowBg).SetAlign(tview.AlignLeft).SetExpansion(1))
 			a.table.SetCell(row, 4, tview.NewTableCell(" - ").SetBackgroundColor(rowBg).SetAlign(tview.AlignLeft).SetExpansion(1))
@@ -332,6 +357,7 @@ func (a *App) updateTable() {
 			a.table.SetCell(row, 6, tview.NewTableCell(" - ").SetBackgroundColor(rowBg).SetAlign(tview.AlignLeft).SetExpansion(1))
 			a.table.SetCell(row, 7, tview.NewTableCell(" "+formatNumber(weight.StringFixed(1))+"% ").SetBackgroundColor(rowBg).SetAlign(tview.AlignLeft).SetExpansion(1))
 			a.table.SetCell(row, 8, tview.NewTableCell(" - ").SetBackgroundColor(rowBg).SetAlign(tview.AlignLeft).SetExpansion(1))
+			a.table.SetCell(row, 9, tview.NewTableCell(" - ").SetBackgroundColor(rowBg).SetAlign(tview.AlignLeft).SetExpansion(1))
 		}
 	}
 
@@ -368,6 +394,7 @@ func (a *App) showAddForm() {
 		AddInputField("Ticker", "", 10, nil, nil).
 		AddInputField("Quantity", "", 15, nil, nil).
 		AddInputField("Avg Cost ($)", "", 15, nil, nil).
+		AddInputField("Target Price ($)", "", 15, nil, nil).
 		AddInputField("Entry Date (YYYY-MM-DD)", time.Now().Format("2006-01-02"), 15, nil, nil).
 		AddInputField("Notes", "", 30, nil, nil)
 
@@ -385,8 +412,9 @@ func (a *App) showAddForm() {
 		ticker := strings.ToUpper(form.GetFormItem(0).(*tview.InputField).GetText())
 		qtyStr := form.GetFormItem(1).(*tview.InputField).GetText()
 		costStr := form.GetFormItem(2).(*tview.InputField).GetText()
-		dateStr := form.GetFormItem(3).(*tview.InputField).GetText()
-		notes := form.GetFormItem(4).(*tview.InputField).GetText()
+		targetStr := form.GetFormItem(3).(*tview.InputField).GetText()
+		dateStr := form.GetFormItem(4).(*tview.InputField).GetText()
+		notes := form.GetFormItem(5).(*tview.InputField).GetText()
 
 		if ticker == "" || qtyStr == "" || costStr == "" {
 			a.statusBar.SetText(" [red]Ticker, Quantity, and Avg Cost are required")
@@ -405,6 +433,16 @@ func (a *App) showAddForm() {
 			return
 		}
 
+		var targetPrice decimal.NullDecimal
+		if targetStr != "" {
+			tp, err := decimal.NewFromString(targetStr)
+			if err != nil {
+				a.statusBar.SetText(" [red]Invalid target price")
+				return
+			}
+			targetPrice = decimal.NullDecimal{Decimal: tp, Valid: true}
+		}
+
 		entryDate, err := time.Parse("2006-01-02", dateStr)
 		if err != nil {
 			a.statusBar.SetText(" [red]Invalid date format")
@@ -412,7 +450,7 @@ func (a *App) showAddForm() {
 		}
 
 		ctx := context.Background()
-		if err := a.db.AddHolding(ctx, ticker, qty, cost, entryDate, notes); err != nil {
+		if err := a.db.AddHolding(ctx, ticker, qty, cost, entryDate, targetPrice, notes); err != nil {
 			a.statusBar.SetText(fmt.Sprintf(" [red]Error: %v", err))
 			return
 		}
@@ -466,9 +504,15 @@ func (a *App) showHoldingActions(index int) {
 func (a *App) showEditForm(index int) {
 	h := a.holdings[index]
 
+	targetStr := ""
+	if h.TargetPrice.Valid {
+		targetStr = h.TargetPrice.Decimal.String()
+	}
+
 	form := tview.NewForm().
 		AddInputField("Quantity", h.Quantity.String(), 15, nil, nil).
 		AddInputField("Avg Cost ($)", h.AvgCost.String(), 15, nil, nil).
+		AddInputField("Target Price ($)", targetStr, 15, nil, nil).
 		AddInputField("Notes", h.Notes, 30, nil, nil)
 
 	// Style the form
@@ -484,7 +528,8 @@ func (a *App) showEditForm(index int) {
 	form.AddButton("Save", func() {
 		qtyStr := form.GetFormItem(0).(*tview.InputField).GetText()
 		costStr := form.GetFormItem(1).(*tview.InputField).GetText()
-		notes := form.GetFormItem(2).(*tview.InputField).GetText()
+		targetStr := form.GetFormItem(2).(*tview.InputField).GetText()
+		notes := form.GetFormItem(3).(*tview.InputField).GetText()
 
 		qty, err := decimal.NewFromString(qtyStr)
 		if err != nil {
@@ -498,8 +543,18 @@ func (a *App) showEditForm(index int) {
 			return
 		}
 
+		var targetPrice decimal.NullDecimal
+		if targetStr != "" {
+			tp, err := decimal.NewFromString(targetStr)
+			if err != nil {
+				a.statusBar.SetText(" [red]Invalid target price")
+				return
+			}
+			targetPrice = decimal.NullDecimal{Decimal: tp, Valid: true}
+		}
+
 		ctx := context.Background()
-		if err := a.db.UpdateHolding(ctx, h.ID, qty, cost, notes); err != nil {
+		if err := a.db.UpdateHolding(ctx, h.ID, qty, cost, targetPrice, notes); err != nil {
 			a.statusBar.SetText(fmt.Sprintf(" [red]Error: %v", err))
 			return
 		}

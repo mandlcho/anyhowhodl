@@ -10,14 +10,15 @@ import (
 )
 
 type Holding struct {
-	ID        string
-	Ticker    string
-	Quantity  decimal.Decimal
-	AvgCost   decimal.Decimal
-	EntryDate time.Time
-	Notes     string
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	ID          string
+	Ticker      string
+	Quantity    decimal.Decimal
+	AvgCost     decimal.Decimal
+	EntryDate   time.Time
+	TargetPrice decimal.NullDecimal
+	Notes       string
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }
 
 type DB struct {
@@ -43,16 +44,16 @@ func (d *DB) Close() {
 	d.pool.Close()
 }
 
-func (d *DB) AddHolding(ctx context.Context, ticker string, quantity, avgCost decimal.Decimal, entryDate time.Time, notes string) error {
+func (d *DB) AddHolding(ctx context.Context, ticker string, quantity, avgCost decimal.Decimal, entryDate time.Time, targetPrice decimal.NullDecimal, notes string) error {
 	_, err := d.pool.Exec(ctx,
-		`INSERT INTO holdings (ticker, quantity, avg_cost, entry_date, notes) VALUES ($1, $2, $3, $4, $5)`,
-		ticker, quantity, avgCost, entryDate, notes)
+		`INSERT INTO holdings (ticker, quantity, avg_cost, entry_date, target_price, notes) VALUES ($1, $2, $3, $4, $5, $6)`,
+		ticker, quantity, avgCost, entryDate, targetPrice, notes)
 	return err
 }
 
 func (d *DB) GetHoldings(ctx context.Context) ([]Holding, error) {
 	rows, err := d.pool.Query(ctx,
-		`SELECT id, ticker, quantity, avg_cost, entry_date, notes, created_at, updated_at FROM holdings ORDER BY ticker`)
+		`SELECT id, ticker, quantity, avg_cost, entry_date, target_price, notes, created_at, updated_at FROM holdings ORDER BY ticker`)
 	if err != nil {
 		return nil, err
 	}
@@ -61,10 +62,14 @@ func (d *DB) GetHoldings(ctx context.Context) ([]Holding, error) {
 	var holdings []Holding
 	for rows.Next() {
 		var h Holding
+		var targetPrice *decimal.Decimal
 		var notes *string
-		err := rows.Scan(&h.ID, &h.Ticker, &h.Quantity, &h.AvgCost, &h.EntryDate, &notes, &h.CreatedAt, &h.UpdatedAt)
+		err := rows.Scan(&h.ID, &h.Ticker, &h.Quantity, &h.AvgCost, &h.EntryDate, &targetPrice, &notes, &h.CreatedAt, &h.UpdatedAt)
 		if err != nil {
 			return nil, err
+		}
+		if targetPrice != nil {
+			h.TargetPrice = decimal.NullDecimal{Decimal: *targetPrice, Valid: true}
 		}
 		if notes != nil {
 			h.Notes = *notes
@@ -74,10 +79,10 @@ func (d *DB) GetHoldings(ctx context.Context) ([]Holding, error) {
 	return holdings, rows.Err()
 }
 
-func (d *DB) UpdateHolding(ctx context.Context, id string, quantity, avgCost decimal.Decimal, notes string) error {
+func (d *DB) UpdateHolding(ctx context.Context, id string, quantity, avgCost decimal.Decimal, targetPrice decimal.NullDecimal, notes string) error {
 	_, err := d.pool.Exec(ctx,
-		`UPDATE holdings SET quantity = $2, avg_cost = $3, notes = $4 WHERE id = $1`,
-		id, quantity, avgCost, notes)
+		`UPDATE holdings SET quantity = $2, avg_cost = $3, target_price = $4, notes = $5 WHERE id = $1`,
+		id, quantity, avgCost, targetPrice, notes)
 	return err
 }
 
@@ -88,15 +93,19 @@ func (d *DB) DeleteHolding(ctx context.Context, id string) error {
 
 func (d *DB) GetHoldingByTicker(ctx context.Context, ticker string) (*Holding, error) {
 	var h Holding
+	var targetPrice *decimal.Decimal
 	var notes *string
 	err := d.pool.QueryRow(ctx,
-		`SELECT id, ticker, quantity, avg_cost, entry_date, notes, created_at, updated_at FROM holdings WHERE ticker = $1`,
-		ticker).Scan(&h.ID, &h.Ticker, &h.Quantity, &h.AvgCost, &h.EntryDate, &notes, &h.CreatedAt, &h.UpdatedAt)
+		`SELECT id, ticker, quantity, avg_cost, entry_date, target_price, notes, created_at, updated_at FROM holdings WHERE ticker = $1`,
+		ticker).Scan(&h.ID, &h.Ticker, &h.Quantity, &h.AvgCost, &h.EntryDate, &targetPrice, &notes, &h.CreatedAt, &h.UpdatedAt)
 	if err == pgx.ErrNoRows {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
+	}
+	if targetPrice != nil {
+		h.TargetPrice = decimal.NullDecimal{Decimal: *targetPrice, Valid: true}
 	}
 	if notes != nil {
 		h.Notes = *notes
