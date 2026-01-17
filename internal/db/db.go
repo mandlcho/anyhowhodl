@@ -30,6 +30,7 @@ type Option struct {
 	ExpiryDate time.Time
 	Quantity   int
 	Premium    decimal.Decimal
+	Status     string // ACTIVE, EXPIRED, ASSIGNED
 	Notes      string
 	CreatedAt  time.Time
 	UpdatedAt  time.Time
@@ -148,17 +149,37 @@ func (d *DB) SetAvailableCash(ctx context.Context, amount decimal.Decimal) error
 }
 
 func (d *DB) AddOption(ctx context.Context, ticker, optionType, action string, strike decimal.Decimal, expiryDate time.Time, quantity int, premium decimal.Decimal, notes string) error {
+	// Insert the option
 	_, err := d.pool.Exec(ctx,
-		`INSERT INTO options (ticker, option_type, action, strike, expiry_date, quantity, premium, notes) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+		`INSERT INTO options (ticker, option_type, action, strike, expiry_date, quantity, premium, status, notes) VALUES ($1, $2, $3, $4, $5, $6, $7, 'ACTIVE', $8)`,
 		ticker, optionType, action, strike, expiryDate, quantity, premium, notes)
-	return err
+	if err != nil {
+		return err
+	}
+
+	// Auto-adjust cash based on action
+	// SELL = receive premium, BUY = pay premium
+	premiumTotal := premium.Mul(decimal.NewFromInt(int64(quantity))).Mul(decimal.NewFromInt(100))
+
+	currentCash, err := d.GetAvailableCash(ctx)
+	if err != nil {
+		currentCash = decimal.Zero
+	}
+
+	if action == "SELL" {
+		currentCash = currentCash.Add(premiumTotal)
+	} else {
+		currentCash = currentCash.Sub(premiumTotal)
+	}
+
+	return d.SetAvailableCash(ctx, currentCash)
 }
 
 func (d *DB) GetActiveOptions(ctx context.Context) ([]Option, error) {
 	rows, err := d.pool.Query(ctx,
-		`SELECT id, ticker, option_type, action, strike, expiry_date, quantity, premium, notes, created_at, updated_at
+		`SELECT id, ticker, option_type, action, strike, expiry_date, quantity, premium, status, notes, created_at, updated_at
 		 FROM options
-		 WHERE expiry_date >= CURRENT_DATE
+		 WHERE status = 'ACTIVE'
 		 ORDER BY expiry_date, ticker`)
 	if err != nil {
 		return nil, err
@@ -169,7 +190,7 @@ func (d *DB) GetActiveOptions(ctx context.Context) ([]Option, error) {
 	for rows.Next() {
 		var o Option
 		var notes *string
-		err := rows.Scan(&o.ID, &o.Ticker, &o.OptionType, &o.Action, &o.Strike, &o.ExpiryDate, &o.Quantity, &o.Premium, &notes, &o.CreatedAt, &o.UpdatedAt)
+		err := rows.Scan(&o.ID, &o.Ticker, &o.OptionType, &o.Action, &o.Strike, &o.ExpiryDate, &o.Quantity, &o.Premium, &o.Status, &notes, &o.CreatedAt, &o.UpdatedAt)
 		if err != nil {
 			return nil, err
 		}
@@ -190,6 +211,93 @@ func (d *DB) UpdateOption(ctx context.Context, id string, strike decimal.Decimal
 
 func (d *DB) DeleteOption(ctx context.Context, id string) error {
 	_, err := d.pool.Exec(ctx, `DELETE FROM options WHERE id = $1`, id)
+	return err
+}
+
+func (d *DB) ExpireOption(ctx context.Context, id string) error {
+	_, err := d.pool.Exec(ctx, `UPDATE options SET status = 'EXPIRED' WHERE id = $1`, id)
+	return err
+}
+
+func (d *DB) AssignOption(ctx context.Context, id string) error {
+	// Get the option details first
+	var o Option
+	var notes *string
+	err := d.pool.QueryRow(ctx,
+		`SELECT id, ticker, option_type, action, strike, expiry_date, quantity, premium, status, notes FROM options WHERE id = $1`, id).
+		Scan(&o.ID, &o.Ticker, &o.OptionType, &o.Action, &o.Strike, &o.ExpiryDate, &o.Quantity, &o.Premium, &o.Status, &notes)
+	if err != nil {
+		return err
+	}
+
+	// Calculate total value (strike × quantity × 100)
+	totalValue := o.Strike.Mul(decimal.NewFromInt(int64(o.Quantity))).Mul(decimal.NewFromInt(100))
+	shares := decimal.NewFromInt(int64(o.Quantity * 100))
+
+	// Get current cash
+	currentCash, err := d.GetAvailableCash(ctx)
+	if err != nil {
+		currentCash = decimal.Zero
+	}
+
+	if o.OptionType == "PUT" {
+		// PUT assigned: we buy shares at strike price
+		// Deduct cash, add to holdings
+		currentCash = currentCash.Sub(totalValue)
+
+		// Check if holding exists, update or create
+		existing, err := d.GetHoldingByTicker(ctx, o.Ticker)
+		if err != nil {
+			return err
+		}
+
+		if existing != nil {
+			// Update existing holding with new average cost
+			totalShares := existing.Quantity.Add(shares)
+			totalCost := existing.Quantity.Mul(existing.AvgCost).Add(shares.Mul(o.Strike))
+			newAvgCost := totalCost.Div(totalShares)
+			err = d.UpdateHolding(ctx, existing.ID, totalShares, newAvgCost, existing.TargetPrice, existing.Notes)
+		} else {
+			// Create new holding
+			err = d.AddHolding(ctx, o.Ticker, shares, o.Strike, time.Now(), decimal.NullDecimal{}, "Assigned from PUT option")
+		}
+		if err != nil {
+			return err
+		}
+	} else {
+		// CALL assigned: we sell shares at strike price
+		// Add cash, remove from holdings
+		currentCash = currentCash.Add(totalValue)
+
+		// Find and reduce/remove holding
+		existing, err := d.GetHoldingByTicker(ctx, o.Ticker)
+		if err != nil {
+			return err
+		}
+
+		if existing != nil {
+			remainingShares := existing.Quantity.Sub(shares)
+			if remainingShares.LessThanOrEqual(decimal.Zero) {
+				// Remove holding entirely
+				err = d.DeleteHolding(ctx, existing.ID)
+			} else {
+				// Reduce holding
+				err = d.UpdateHolding(ctx, existing.ID, remainingShares, existing.AvgCost, existing.TargetPrice, existing.Notes)
+			}
+			if err != nil {
+				return err
+			}
+		}
+	}
+
+	// Update cash
+	err = d.SetAvailableCash(ctx, currentCash)
+	if err != nil {
+		return err
+	}
+
+	// Mark option as assigned
+	_, err = d.pool.Exec(ctx, `UPDATE options SET status = 'ASSIGNED' WHERE id = $1`, id)
 	return err
 }
 

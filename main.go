@@ -981,11 +981,22 @@ func (a *App) showOptionActions(index int) {
 	o := a.options[index]
 
 	typeStr := o.OptionType
+	actionDesc := "You receive shares"
+	if typeStr == "CALL" {
+		actionDesc = "Your shares get called away"
+	}
+
 	modal := tview.NewModal().
-		SetText(fmt.Sprintf("%s %s %s $%s\nExpires: %s", o.Action, o.Ticker, typeStr, o.Strike.StringFixed(2), o.ExpiryDate.Format("2006-01-02"))).
-		AddButtons([]string{"Delete", "Cancel"}).
+		SetText(fmt.Sprintf("%s %s %s $%s\nExpires: %s\n\nAssign: %s", o.Action, o.Ticker, typeStr, o.Strike.StringFixed(2), o.ExpiryDate.Format("2006-01-02"), actionDesc)).
+		AddButtons([]string{"Assign", "Expire", "Delete", "Cancel"}).
 		SetDoneFunc(func(buttonIndex int, buttonLabel string) {
 			switch buttonLabel {
+			case "Assign":
+				a.pages.RemovePage("optionactions")
+				a.confirmAssignOption(index)
+			case "Expire":
+				a.pages.RemovePage("optionactions")
+				a.confirmExpireOption(index)
 			case "Delete":
 				a.pages.RemovePage("optionactions")
 				a.confirmDeleteOption(index)
@@ -1015,6 +1026,62 @@ func (a *App) confirmDeleteOption(index int) {
 		})
 
 	a.pages.AddPage("confirmoption", modal, true, true)
+}
+
+func (a *App) confirmAssignOption(index int) {
+	o := a.options[index]
+
+	shares := o.Quantity * 100
+	totalValue := o.Strike.Mul(decimal.NewFromInt(int64(shares)))
+
+	var actionText string
+	if o.OptionType == "PUT" {
+		actionText = fmt.Sprintf("BUY %d shares of %s @ $%s\nCash: -$%s",
+			shares, o.Ticker, o.Strike.StringFixed(2), formatNumber(totalValue.StringFixed(2)))
+	} else {
+		actionText = fmt.Sprintf("SELL %d shares of %s @ $%s\nCash: +$%s",
+			shares, o.Ticker, o.Strike.StringFixed(2), formatNumber(totalValue.StringFixed(2)))
+	}
+
+	modal := tview.NewModal().
+		SetText(fmt.Sprintf("Assign %s %s $%s?\n\n%s", o.Ticker, o.OptionType, o.Strike.StringFixed(2), actionText)).
+		AddButtons([]string{"Confirm", "Cancel"}).
+		SetDoneFunc(func(buttonIndex int, buttonLabel string) {
+			if buttonLabel == "Confirm" {
+				ctx := context.Background()
+				if err := a.db.AssignOption(ctx, o.ID); err != nil {
+					a.statusBar.SetText(fmt.Sprintf(" [red]Error: %v", err))
+				} else {
+					a.statusBar.SetText(fmt.Sprintf(" [green]Option assigned: %s %s", o.Ticker, o.OptionType))
+				}
+				a.refreshData()
+			}
+			a.pages.RemovePage("confirmassign")
+		})
+
+	a.pages.AddPage("confirmassign", modal, true, true)
+}
+
+func (a *App) confirmExpireOption(index int) {
+	o := a.options[index]
+
+	modal := tview.NewModal().
+		SetText(fmt.Sprintf("Mark %s %s $%s as expired?\n\nOption expires worthless, no shares exchanged.", o.Ticker, o.OptionType, o.Strike.StringFixed(2))).
+		AddButtons([]string{"Confirm", "Cancel"}).
+		SetDoneFunc(func(buttonIndex int, buttonLabel string) {
+			if buttonLabel == "Confirm" {
+				ctx := context.Background()
+				if err := a.db.ExpireOption(ctx, o.ID); err != nil {
+					a.statusBar.SetText(fmt.Sprintf(" [red]Error: %v", err))
+				} else {
+					a.statusBar.SetText(fmt.Sprintf(" [green]Option expired: %s %s", o.Ticker, o.OptionType))
+				}
+				a.refreshData()
+			}
+			a.pages.RemovePage("confirmexpire")
+		})
+
+	a.pages.AddPage("confirmexpire", modal, true, true)
 }
 
 func formatNumber(s string) string {

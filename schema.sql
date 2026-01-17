@@ -55,10 +55,14 @@ CREATE TABLE IF NOT EXISTS options (
     expiry_date DATE NOT NULL,
     quantity INTEGER NOT NULL,
     premium DECIMAL(18, 4) NOT NULL,
+    status VARCHAR(10) NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE', 'EXPIRED', 'ASSIGNED')),
     notes TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- Migration: Add status column if it doesn't exist
+-- ALTER TABLE options ADD COLUMN IF NOT EXISTS status VARCHAR(10) NOT NULL DEFAULT 'ACTIVE';
 
 -- Index for faster expiry lookups
 CREATE INDEX IF NOT EXISTS idx_options_expiry ON options(expiry_date);
