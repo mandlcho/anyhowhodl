@@ -33,3 +33,14 @@ CREATE TRIGGER update_holdings_updated_at
     BEFORE UPDATE ON holdings
     FOR EACH ROW
     EXECUTE FUNCTION update_updated_at_column();
+
+-- Settings table for portfolio-level settings like available cash
+CREATE TABLE IF NOT EXISTS settings (
+    key VARCHAR(50) PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Initialize available cash to 0
+INSERT INTO settings (key, value) VALUES ('available_cash', '0')
+ON CONFLICT (key) DO NOTHING;

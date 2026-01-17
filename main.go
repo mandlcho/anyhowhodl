@@ -27,6 +27,7 @@ type App struct {
 	summary     *tview.TextView
 	holdings    []db.Holding
 	quotes      map[string]yahoo.Quote
+	cash        decimal.Decimal
 }
 
 func main() {
@@ -77,7 +78,7 @@ func (a *App) run() {
 	// Status bar
 	a.statusBar = tview.NewTextView().
 		SetDynamicColors(true).
-		SetText(" [yellow]a[white]:Add  [yellow]d[white]:Delete  [yellow]r[white]:Refresh  [yellow]q[white]:Quit")
+		SetText(" [yellow]a[white]:Add  [yellow]c[white]:Cash  [yellow]d[white]:Delete  [yellow]r[white]:Refresh  [yellow]q[white]:Quit")
 
 	// Summary bar
 	a.summary = tview.NewTextView().SetDynamicColors(true)
@@ -107,6 +108,9 @@ func (a *App) run() {
 			return nil
 		case 'a':
 			a.showAddForm()
+			return nil
+		case 'c':
+			a.showCashForm()
 			return nil
 		case 'd':
 			row, _ := a.table.GetSelection()
@@ -158,6 +162,13 @@ func (a *App) refreshData() {
 	}
 	a.holdings = holdings
 
+	// Get available cash
+	cash, err := a.db.GetAvailableCash(ctx)
+	if err != nil {
+		cash = decimal.Zero
+	}
+	a.cash = cash
+
 	// Get unique tickers
 	tickers := make([]string, 0)
 	tickerMap := make(map[string]bool)
@@ -179,7 +190,7 @@ func (a *App) refreshData() {
 	}
 
 	a.updateTable()
-	a.statusBar.SetText(" [yellow]a[white]:Add  [yellow]d[white]:Delete  [yellow]r[white]:Refresh  [yellow]q[white]:Quit")
+	a.statusBar.SetText(" [yellow]a[white]:Add  [yellow]c[white]:Cash  [yellow]d[white]:Delete  [yellow]r[white]:Refresh  [yellow]q[white]:Quit")
 }
 
 func (a *App) updateTable() {
@@ -380,9 +391,13 @@ func (a *App) updateTable() {
 		plSign = "+"
 	}
 
-	summaryText := fmt.Sprintf(" [white]Total: [yellow]$%s[white]  |  Cost: $%s  |  P/L: %s%s$%s (%s%.2f%%)",
+	// Total portfolio = holdings value + cash
+	totalPortfolio := totalValue.Add(a.cash)
+
+	summaryText := fmt.Sprintf(" [white]Total: [yellow]$%s[white]  |  Holdings: $%s  |  Cash: [aqua]$%s[white]  |  P/L: %s%s$%s (%s%.2f%%)",
+		formatNumber(totalPortfolio.StringFixed(2)),
 		formatNumber(totalValue.StringFixed(2)),
-		formatNumber(totalCost.StringFixed(2)),
+		formatNumber(a.cash.StringFixed(2)),
 		plColor, plSign, formatNumber(totalPL.Abs().StringFixed(2)),
 		plSign, totalPLPct.InexactFloat64())
 
@@ -600,6 +615,58 @@ func (a *App) confirmDelete(index int) {
 		})
 
 	a.pages.AddPage("confirm", modal, true, true)
+}
+
+func (a *App) showCashForm() {
+	form := tview.NewForm().
+		AddInputField("Available Cash ($)", a.cash.StringFixed(2), 15, nil, nil)
+
+	// Style the form
+	form.SetBackgroundColor(tcell.ColorBlack)
+	form.SetFieldBackgroundColor(tcell.ColorDarkSlateGray)
+	form.SetFieldTextColor(tcell.ColorWhite)
+	form.SetLabelColor(tcell.ColorTeal)
+	form.SetButtonBackgroundColor(tcell.ColorTeal)
+	form.SetButtonTextColor(tcell.ColorBlack)
+	form.SetBorderColor(tcell.ColorTeal)
+	form.SetTitleColor(tcell.ColorTeal)
+
+	form.AddButton("Save", func() {
+		cashStr := form.GetFormItem(0).(*tview.InputField).GetText()
+
+		cash, err := decimal.NewFromString(cashStr)
+		if err != nil {
+			a.statusBar.SetText(" [red]Invalid cash amount")
+			return
+		}
+
+		ctx := context.Background()
+		if err := a.db.SetAvailableCash(ctx, cash); err != nil {
+			a.statusBar.SetText(fmt.Sprintf(" [red]Error: %v", err))
+			return
+		}
+
+		a.pages.SwitchToPage("main")
+		a.pages.RemovePage("cash")
+		a.refreshData()
+	})
+
+	form.AddButton("Cancel", func() {
+		a.pages.SwitchToPage("main")
+		a.pages.RemovePage("cash")
+	})
+
+	form.SetBorder(true).SetTitle(" Set Available Cash ").SetTitleAlign(tview.AlignLeft)
+
+	flex := tview.NewFlex().
+		AddItem(nil, 0, 1, false).
+		AddItem(tview.NewFlex().SetDirection(tview.FlexRow).
+			AddItem(nil, 0, 1, false).
+			AddItem(form, 7, 1, true).
+			AddItem(nil, 0, 1, false), 40, 1, true).
+		AddItem(nil, 0, 1, false)
+
+	a.pages.AddPage("cash", flex, true, true)
 }
 
 func formatNumber(s string) string {

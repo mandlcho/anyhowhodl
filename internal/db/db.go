@@ -112,3 +112,23 @@ func (d *DB) GetHoldingByTicker(ctx context.Context, ticker string) (*Holding, e
 	}
 	return &h, nil
 }
+
+func (d *DB) GetAvailableCash(ctx context.Context) (decimal.Decimal, error) {
+	var value string
+	err := d.pool.QueryRow(ctx, `SELECT value FROM settings WHERE key = 'available_cash'`).Scan(&value)
+	if err == pgx.ErrNoRows {
+		return decimal.Zero, nil
+	}
+	if err != nil {
+		return decimal.Zero, err
+	}
+	return decimal.NewFromString(value)
+}
+
+func (d *DB) SetAvailableCash(ctx context.Context, amount decimal.Decimal) error {
+	_, err := d.pool.Exec(ctx,
+		`INSERT INTO settings (key, value, updated_at) VALUES ('available_cash', $1, NOW())
+		 ON CONFLICT (key) DO UPDATE SET value = $1, updated_at = NOW()`,
+		amount.String())
+	return err
+}
