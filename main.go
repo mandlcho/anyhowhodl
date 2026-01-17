@@ -555,16 +555,7 @@ func (a *App) showAddForm() {
 
 	form.SetBorder(true).SetTitle(" Add Holding ").SetTitleAlign(tview.AlignLeft)
 
-	// Center the form
-	flex := tview.NewFlex().
-		AddItem(nil, 0, 1, false).
-		AddItem(tview.NewFlex().SetDirection(tview.FlexRow).
-			AddItem(nil, 0, 1, false).
-			AddItem(form, 15, 1, true).
-			AddItem(nil, 0, 1, false), 50, 1, true).
-		AddItem(nil, 0, 1, false)
-
-	a.pages.AddPage("add", flex, true, true)
+	a.createModalPage("add", form, 50, 15)
 }
 
 func (a *App) showHoldingActions(index int) {
@@ -659,15 +650,7 @@ func (a *App) showEditForm(index int) {
 
 	form.SetBorder(true).SetTitle(fmt.Sprintf(" Edit %s ", h.Ticker)).SetTitleAlign(tview.AlignLeft)
 
-	flex := tview.NewFlex().
-		AddItem(nil, 0, 1, false).
-		AddItem(tview.NewFlex().SetDirection(tview.FlexRow).
-			AddItem(nil, 0, 1, false).
-			AddItem(form, 12, 1, true).
-			AddItem(nil, 0, 1, false), 50, 1, true).
-		AddItem(nil, 0, 1, false)
-
-	a.pages.AddPage("edit", flex, true, true)
+	a.createModalPage("edit", form, 50, 12)
 }
 
 func (a *App) confirmDelete(index int) {
@@ -739,15 +722,7 @@ func (a *App) showCashForm() {
 
 	form.SetBorder(true).SetTitle(" Set Available Cash ").SetTitleAlign(tview.AlignLeft)
 
-	flex := tview.NewFlex().
-		AddItem(nil, 0, 1, false).
-		AddItem(tview.NewFlex().SetDirection(tview.FlexRow).
-			AddItem(nil, 0, 1, false).
-			AddItem(form, 9, 1, true).
-			AddItem(nil, 0, 1, false), 45, 1, true).
-		AddItem(nil, 0, 1, false)
-
-	a.pages.AddPage("cash", flex, true, true)
+	a.createModalPage("cash", form, 45, 9)
 }
 
 func (a *App) updateOptionsTable() {
@@ -969,15 +944,7 @@ func (a *App) showAddOptionForm() {
 
 	form.SetBorder(true).SetTitle(" Add Option ").SetTitleAlign(tview.AlignLeft)
 
-	flex := tview.NewFlex().
-		AddItem(nil, 0, 1, false).
-		AddItem(tview.NewFlex().SetDirection(tview.FlexRow).
-			AddItem(nil, 0, 1, false).
-			AddItem(form, 18, 1, true).
-			AddItem(nil, 0, 1, false), 55, 1, true).
-		AddItem(nil, 0, 1, false)
-
-	a.pages.AddPage("addoption", flex, true, true)
+	a.createModalPage("addoption", form, 55, 18)
 }
 
 func (a *App) showOptionActions(index int) {
@@ -1136,6 +1103,27 @@ func (a *App) processExpiredOptions(ctx context.Context) {
 			a.db.ExpireOption(ctx, o.ID)
 		}
 	}
+}
+
+func (a *App) createModalPage(name string, content tview.Primitive, width, height int) {
+	// Create a background that captures all input
+	background := tview.NewBox().SetBackgroundColor(tcell.ColorBlack)
+
+	// Center the content
+	flex := tview.NewFlex().
+		AddItem(nil, 0, 1, false).
+		AddItem(tview.NewFlex().SetDirection(tview.FlexRow).
+			AddItem(nil, 0, 1, false).
+			AddItem(content, height, 0, true).
+			AddItem(nil, 0, 1, false), width, 0, true).
+		AddItem(nil, 0, 1, false)
+
+	// Layer the flex on top of the background
+	pages := tview.NewPages().
+		AddPage("bg", background, true, true).
+		AddPage("content", flex, true, true)
+
+	a.pages.AddPage(name, pages, true, true)
 }
 
 func formatNumber(s string) string {
