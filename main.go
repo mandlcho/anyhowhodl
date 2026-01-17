@@ -618,20 +618,9 @@ func (a *App) confirmDelete(index int) {
 }
 
 func (a *App) showCashForm() {
-	form := tview.NewForm().
-		AddInputField("Available Cash ($)", a.cash.StringFixed(2), 15, nil, nil)
+	form := tview.NewForm()
 
-	// Style the form
-	form.SetBackgroundColor(tcell.ColorBlack)
-	form.SetFieldBackgroundColor(tcell.ColorDarkSlateGray)
-	form.SetFieldTextColor(tcell.ColorWhite)
-	form.SetLabelColor(tcell.ColorTeal)
-	form.SetButtonBackgroundColor(tcell.ColorTeal)
-	form.SetButtonTextColor(tcell.ColorBlack)
-	form.SetBorderColor(tcell.ColorTeal)
-	form.SetTitleColor(tcell.ColorTeal)
-
-	form.AddButton("Save", func() {
+	saveCash := func() {
 		cashStr := form.GetFormItem(0).(*tview.InputField).GetText()
 
 		cash, err := decimal.NewFromString(cashStr)
@@ -649,7 +638,26 @@ func (a *App) showCashForm() {
 		a.pages.SwitchToPage("main")
 		a.pages.RemovePage("cash")
 		a.refreshData()
+	}
+
+	form.AddInputField("Available Cash ($)", a.cash.StringFixed(2), 15, nil, func(text string) {})
+	form.GetFormItem(0).(*tview.InputField).SetDoneFunc(func(key tcell.Key) {
+		if key == tcell.KeyEnter {
+			saveCash()
+		}
 	})
+
+	// Style the form
+	form.SetBackgroundColor(tcell.ColorBlack)
+	form.SetFieldBackgroundColor(tcell.ColorDarkSlateGray)
+	form.SetFieldTextColor(tcell.ColorWhite)
+	form.SetLabelColor(tcell.ColorTeal)
+	form.SetButtonBackgroundColor(tcell.ColorTeal)
+	form.SetButtonTextColor(tcell.ColorBlack)
+	form.SetBorderColor(tcell.ColorTeal)
+	form.SetTitleColor(tcell.ColorTeal)
+
+	form.AddButton("Save", saveCash)
 
 	form.AddButton("Cancel", func() {
 		a.pages.SwitchToPage("main")
