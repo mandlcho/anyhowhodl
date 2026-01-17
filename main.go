@@ -870,7 +870,7 @@ func (a *App) showAddOptionForm() {
 	form := tview.NewForm().
 		AddInputField("Ticker", "", 10, nil, nil).
 		AddDropDown("Type", []string{"CALL", "PUT"}, 0, nil).
-		AddDropDown("Action", []string{"BUY", "SELL"}, 0, nil).
+		AddDropDown("Action", []string{"SELL", "BUY"}, 0, nil).
 		AddInputField("Strike ($)", "", 15, nil, nil).
 		AddInputField("Expiry (YYYY-MM-DD)", "", 15, nil, nil).
 		AddInputField("Quantity", "1", 10, nil, nil).
