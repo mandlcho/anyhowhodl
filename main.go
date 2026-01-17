@@ -480,7 +480,18 @@ func (a *App) updateTable() {
 func (a *App) showAddForm() {
 	form := tview.NewForm().
 		AddInputField("Ticker", "", 10, nil, nil).
-		AddInputField("Quantity", "", 15, nil, nil).
+		AddInputField("Quantity", "", 15, nil, nil)
+
+	// Auto-uppercase ticker
+	tickerField := form.GetFormItem(0).(*tview.InputField)
+	tickerField.SetChangedFunc(func(text string) {
+		upper := strings.ToUpper(text)
+		if text != upper {
+			tickerField.SetText(upper)
+		}
+	})
+
+	form.
 		AddInputField("Avg Cost ($)", "", 15, nil, nil).
 		AddInputField("Target Price ($)", "", 15, nil, nil).
 		AddInputField("Entry Date (YYYY-MM-DD)", time.Now().Format("2006-01-02"), 15, nil, nil).
@@ -868,7 +879,18 @@ func (a *App) updateTimeline() {
 
 func (a *App) showAddOptionForm() {
 	form := tview.NewForm().
-		AddInputField("Ticker", "", 10, nil, nil).
+		AddInputField("Ticker", "", 10, nil, nil)
+
+	// Auto-uppercase ticker
+	tickerField := form.GetFormItem(0).(*tview.InputField)
+	tickerField.SetChangedFunc(func(text string) {
+		upper := strings.ToUpper(text)
+		if text != upper {
+			tickerField.SetText(upper)
+		}
+	})
+
+	form.
 		AddDropDown("Type", []string{"CALL", "PUT"}, 0, nil).
 		AddDropDown("Action", []string{"SELL", "BUY"}, 0, nil).
 		AddInputField("Strike ($)", "", 15, nil, nil).
@@ -1106,24 +1128,22 @@ func (a *App) processExpiredOptions(ctx context.Context) {
 }
 
 func (a *App) createModalPage(name string, content tview.Primitive, width, height int) {
-	// Create a background that captures all input
-	background := tview.NewBox().SetBackgroundColor(tcell.ColorBlack)
+	// Create transparent boxes that capture input but don't obscure background
+	leftBox := tview.NewBox()
+	rightBox := tview.NewBox()
+	topBox := tview.NewBox()
+	bottomBox := tview.NewBox()
 
-	// Center the content
+	// Center the content with input-capturing spacers
 	flex := tview.NewFlex().
-		AddItem(nil, 0, 1, false).
+		AddItem(leftBox, 0, 1, false).
 		AddItem(tview.NewFlex().SetDirection(tview.FlexRow).
-			AddItem(nil, 0, 1, false).
+			AddItem(topBox, 0, 1, false).
 			AddItem(content, height, 0, true).
-			AddItem(nil, 0, 1, false), width, 0, true).
-		AddItem(nil, 0, 1, false)
+			AddItem(bottomBox, 0, 1, false), width, 0, true).
+		AddItem(rightBox, 0, 1, false)
 
-	// Layer the flex on top of the background
-	pages := tview.NewPages().
-		AddPage("bg", background, true, true).
-		AddPage("content", flex, true, true)
-
-	a.pages.AddPage(name, pages, true, true)
+	a.pages.AddPage(name, flex, true, true)
 }
 
 func formatNumber(s string) string {
