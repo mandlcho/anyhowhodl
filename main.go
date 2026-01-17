@@ -662,8 +662,8 @@ func (a *App) showCashForm() {
 		AddItem(nil, 0, 1, false).
 		AddItem(tview.NewFlex().SetDirection(tview.FlexRow).
 			AddItem(nil, 0, 1, false).
-			AddItem(form, 7, 1, true).
-			AddItem(nil, 0, 1, false), 40, 1, true).
+			AddItem(form, 9, 1, true).
+			AddItem(nil, 0, 1, false), 45, 1, true).
 		AddItem(nil, 0, 1, false)
 
 	a.pages.AddPage("cash", flex, true, true)
