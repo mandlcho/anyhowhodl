@@ -179,7 +179,34 @@ func (d *DB) GetActiveOptions(ctx context.Context) ([]Option, error) {
 	rows, err := d.pool.Query(ctx,
 		`SELECT id, ticker, option_type, action, strike, expiry_date, quantity, premium, status, notes, created_at, updated_at
 		 FROM options
-		 WHERE status = 'ACTIVE'
+		 WHERE status = 'ACTIVE' AND expiry_date >= CURRENT_DATE
+		 ORDER BY expiry_date, ticker`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var options []Option
+	for rows.Next() {
+		var o Option
+		var notes *string
+		err := rows.Scan(&o.ID, &o.Ticker, &o.OptionType, &o.Action, &o.Strike, &o.ExpiryDate, &o.Quantity, &o.Premium, &o.Status, &notes, &o.CreatedAt, &o.UpdatedAt)
+		if err != nil {
+			return nil, err
+		}
+		if notes != nil {
+			o.Notes = *notes
+		}
+		options = append(options, o)
+	}
+	return options, rows.Err()
+}
+
+func (d *DB) GetExpiredActiveOptions(ctx context.Context) ([]Option, error) {
+	rows, err := d.pool.Query(ctx,
+		`SELECT id, ticker, option_type, action, strike, expiry_date, quantity, premium, status, notes, created_at, updated_at
+		 FROM options
+		 WHERE status = 'ACTIVE' AND expiry_date < CURRENT_DATE
 		 ORDER BY expiry_date, ticker`)
 	if err != nil {
 		return nil, err

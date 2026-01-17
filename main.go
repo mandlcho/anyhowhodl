@@ -222,6 +222,9 @@ func (a *App) refreshData() {
 	}
 	a.cash = cash
 
+	// Process expired options first (auto-assign or expire based on ITM/OTM)
+	a.processExpiredOptions(ctx)
+
 	// Get active options
 	options, err := a.db.GetActiveOptions(ctx)
 	if err != nil {
@@ -1082,6 +1085,57 @@ func (a *App) confirmExpireOption(index int) {
 		})
 
 	a.pages.AddPage("confirmexpire", modal, true, true)
+}
+
+func (a *App) processExpiredOptions(ctx context.Context) {
+	// Get expired options that are still ACTIVE
+	expiredOptions, err := a.db.GetExpiredActiveOptions(ctx)
+	if err != nil || len(expiredOptions) == 0 {
+		return
+	}
+
+	// Get unique tickers
+	tickers := make([]string, 0)
+	tickerMap := make(map[string]bool)
+	for _, o := range expiredOptions {
+		if !tickerMap[o.Ticker] {
+			tickers = append(tickers, o.Ticker)
+			tickerMap[o.Ticker] = true
+		}
+	}
+
+	// Fetch current prices
+	quotes, err := a.yahoo.GetQuotes(tickers)
+	if err != nil {
+		return
+	}
+
+	// Process each expired option
+	for _, o := range expiredOptions {
+		quote, hasQuote := quotes[o.Ticker]
+		if !hasQuote {
+			continue
+		}
+
+		currentPrice := decimal.NewFromFloat(quote.Price)
+		isITM := false
+
+		// CALL is ITM if current price > strike (shares get called away)
+		// PUT is ITM if current price < strike (you get assigned shares)
+		if o.OptionType == "CALL" {
+			isITM = currentPrice.GreaterThan(o.Strike)
+		} else {
+			isITM = currentPrice.LessThan(o.Strike)
+		}
+
+		if isITM {
+			// Auto-assign
+			a.db.AssignOption(ctx, o.ID)
+		} else {
+			// Auto-expire (OTM)
+			a.db.ExpireOption(ctx, o.ID)
+		}
+	}
 }
 
 func formatNumber(s string) string {
