@@ -44,3 +44,29 @@ CREATE TABLE IF NOT EXISTS settings (
 -- Initialize available cash to 0
 INSERT INTO settings (key, value) VALUES ('available_cash', '0')
 ON CONFLICT (key) DO NOTHING;
+
+-- Options table for tracking option contracts
+CREATE TABLE IF NOT EXISTS options (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ticker VARCHAR(10) NOT NULL,
+    option_type VARCHAR(4) NOT NULL CHECK (option_type IN ('CALL', 'PUT')),
+    action VARCHAR(4) NOT NULL CHECK (action IN ('BUY', 'SELL')),
+    strike DECIMAL(18, 2) NOT NULL,
+    expiry_date DATE NOT NULL,
+    quantity INTEGER NOT NULL,
+    premium DECIMAL(18, 4) NOT NULL,
+    notes TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Index for faster expiry lookups
+CREATE INDEX IF NOT EXISTS idx_options_expiry ON options(expiry_date);
+CREATE INDEX IF NOT EXISTS idx_options_ticker ON options(ticker);
+
+-- Trigger for options updated_at
+DROP TRIGGER IF EXISTS update_options_updated_at ON options;
+CREATE TRIGGER update_options_updated_at
+    BEFORE UPDATE ON options
+    FOR EACH ROW
+    EXECUTE FUNCTION update_updated_at_column();

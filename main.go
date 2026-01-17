@@ -18,16 +18,20 @@ import (
 )
 
 type App struct {
-	db          *db.DB
-	yahoo       *yahoo.Client
-	app         *tview.Application
-	pages       *tview.Pages
-	table       *tview.Table
-	statusBar   *tview.TextView
-	summary     *tview.TextView
-	holdings    []db.Holding
-	quotes      map[string]yahoo.Quote
-	cash        decimal.Decimal
+	db           *db.DB
+	yahoo        *yahoo.Client
+	app          *tview.Application
+	pages        *tview.Pages
+	table        *tview.Table
+	optionsTable *tview.Table
+	timeline     *tview.TextView
+	statusBar    *tview.TextView
+	summary      *tview.TextView
+	holdings     []db.Holding
+	options      []db.Option
+	quotes       map[string]yahoo.Quote
+	cash         decimal.Decimal
+	focusIndex   int // 0 = holdings table, 1 = options table
 }
 
 func main() {
@@ -61,7 +65,7 @@ func main() {
 func (a *App) run() {
 	a.app = tview.NewApplication()
 
-	// Create main table
+	// Create holdings table
 	a.table = tview.NewTable().
 		SetBorders(true).
 		SetSelectable(true, false).
@@ -75,19 +79,46 @@ func (a *App) run() {
 		}
 	})
 
+	// Create options table
+	a.optionsTable = tview.NewTable().
+		SetBorders(true).
+		SetSelectable(true, false).
+		SetFixed(1, 0).
+		SetSeparator(' ').
+		SetSelectedStyle(tcell.StyleDefault.Background(tcell.ColorDarkSlateGray))
+
+	a.optionsTable.SetSelectedFunc(func(row, column int) {
+		if row > 0 && row <= len(a.options) {
+			a.showOptionActions(row - 1)
+		}
+	})
+
+	// Timeline view
+	a.timeline = tview.NewTextView().
+		SetDynamicColors(true).
+		SetTextAlign(tview.AlignLeft)
+	a.timeline.SetBorder(true).SetTitle(" Expiration Timeline ").SetTitleAlign(tview.AlignLeft).SetBorderColor(tcell.ColorTeal)
+
 	// Status bar
 	a.statusBar = tview.NewTextView().
 		SetDynamicColors(true).
-		SetText(" [yellow]a[white]:Add  [yellow]c[white]:Cash  [yellow]d[white]:Delete  [yellow]r[white]:Refresh  [yellow]q[white]:Quit")
+		SetText(" [yellow]a[white]:Add Holding  [yellow]o[white]:Add Option  [yellow]c[white]:Cash  [yellow]Tab[white]:Switch  [yellow]d[white]:Delete  [yellow]r[white]:Refresh  [yellow]q[white]:Quit")
 
 	// Summary bar
 	a.summary = tview.NewTextView().SetDynamicColors(true)
+
+	// Options section (table + timeline)
+	optionsSection := tview.NewFlex().
+		SetDirection(tview.FlexRow).
+		AddItem(a.optionsTable, 0, 1, false).
+		AddItem(a.timeline, 5, 0, false)
 
 	// Main layout
 	mainFlex := tview.NewFlex().
 		SetDirection(tview.FlexRow).
 		AddItem(a.createHeader(), 8, 0, false).
 		AddItem(a.table, 0, 1, true).
+		AddItem(optionsSection, 12, 0, false).
 		AddItem(a.summary, 2, 0, false).
 		AddItem(a.statusBar, 1, 0, false)
 
@@ -102,6 +133,17 @@ func (a *App) run() {
 			return event
 		}
 
+		// Tab to switch focus between tables
+		if event.Key() == tcell.KeyTab {
+			a.focusIndex = (a.focusIndex + 1) % 2
+			if a.focusIndex == 0 {
+				a.app.SetFocus(a.table)
+			} else {
+				a.app.SetFocus(a.optionsTable)
+			}
+			return nil
+		}
+
 		switch event.Rune() {
 		case 'q':
 			a.app.Stop()
@@ -109,13 +151,23 @@ func (a *App) run() {
 		case 'a':
 			a.showAddForm()
 			return nil
+		case 'o':
+			a.showAddOptionForm()
+			return nil
 		case 'c':
 			a.showCashForm()
 			return nil
 		case 'd':
-			row, _ := a.table.GetSelection()
-			if row > 0 && row <= len(a.holdings) {
-				a.confirmDelete(row - 1)
+			if a.focusIndex == 0 {
+				row, _ := a.table.GetSelection()
+				if row > 0 && row <= len(a.holdings) {
+					a.confirmDelete(row - 1)
+				}
+			} else {
+				row, _ := a.optionsTable.GetSelection()
+				if row > 0 && row <= len(a.options) {
+					a.confirmDeleteOption(row - 1)
+				}
 			}
 			return nil
 		case 'r':
@@ -169,6 +221,13 @@ func (a *App) refreshData() {
 	}
 	a.cash = cash
 
+	// Get active options
+	options, err := a.db.GetActiveOptions(ctx)
+	if err != nil {
+		options = []db.Option{}
+	}
+	a.options = options
+
 	// Get unique tickers
 	tickers := make([]string, 0)
 	tickerMap := make(map[string]bool)
@@ -190,7 +249,9 @@ func (a *App) refreshData() {
 	}
 
 	a.updateTable()
-	a.statusBar.SetText(" [yellow]a[white]:Add  [yellow]c[white]:Cash  [yellow]d[white]:Delete  [yellow]r[white]:Refresh  [yellow]q[white]:Quit")
+	a.updateOptionsTable()
+	a.updateTimeline()
+	a.statusBar.SetText(" [yellow]a[white]:Add Holding  [yellow]o[white]:Add Option  [yellow]c[white]:Cash  [yellow]Tab[white]:Switch  [yellow]d[white]:Delete  [yellow]r[white]:Refresh  [yellow]q[white]:Quit")
 }
 
 func (a *App) updateTable() {
@@ -675,6 +736,267 @@ func (a *App) showCashForm() {
 		AddItem(nil, 0, 1, false)
 
 	a.pages.AddPage("cash", flex, true, true)
+}
+
+func (a *App) updateOptionsTable() {
+	a.optionsTable.Clear()
+
+	// Header row
+	headers := []string{"TICKER", "TYPE", "ACTION", "STRIKE", "EXPIRY", "QTY", "PREMIUM", "DAYS LEFT"}
+	for i, h := range headers {
+		cell := tview.NewTableCell(" "+h+" ").
+			SetTextColor(tcell.ColorBlack).
+			SetBackgroundColor(tcell.ColorTeal).
+			SetAlign(tview.AlignLeft).
+			SetSelectable(false).
+			SetExpansion(1)
+		a.optionsTable.SetCell(0, i, cell)
+	}
+
+	today := time.Now().Truncate(24 * time.Hour)
+
+	for i, o := range a.options {
+		row := i + 1
+		rowBg := tcell.ColorBlack
+
+		// Ticker
+		a.optionsTable.SetCell(row, 0, tview.NewTableCell(" "+o.Ticker+" ").
+			SetTextColor(tcell.ColorFuchsia).
+			SetBackgroundColor(rowBg).
+			SetAlign(tview.AlignLeft).
+			SetExpansion(1))
+
+		// Type (CALL/PUT)
+		typeColor := tcell.ColorLime
+		if o.OptionType == "PUT" {
+			typeColor = tcell.ColorRed
+		}
+		a.optionsTable.SetCell(row, 1, tview.NewTableCell(" "+o.OptionType+" ").
+			SetTextColor(typeColor).
+			SetBackgroundColor(rowBg).
+			SetAlign(tview.AlignLeft).
+			SetExpansion(1))
+
+		// Action (BUY/SELL)
+		actionColor := tcell.ColorYellow
+		if o.Action == "SELL" {
+			actionColor = tcell.ColorAqua
+		}
+		a.optionsTable.SetCell(row, 2, tview.NewTableCell(" "+o.Action+" ").
+			SetTextColor(actionColor).
+			SetBackgroundColor(rowBg).
+			SetAlign(tview.AlignLeft).
+			SetExpansion(1))
+
+		// Strike
+		a.optionsTable.SetCell(row, 3, tview.NewTableCell(" $"+formatNumber(o.Strike.StringFixed(2))+" ").
+			SetTextColor(tcell.ColorWhite).
+			SetBackgroundColor(rowBg).
+			SetAlign(tview.AlignLeft).
+			SetExpansion(1))
+
+		// Expiry
+		a.optionsTable.SetCell(row, 4, tview.NewTableCell(" "+o.ExpiryDate.Format("2006-01-02")+" ").
+			SetTextColor(tcell.ColorWhite).
+			SetBackgroundColor(rowBg).
+			SetAlign(tview.AlignLeft).
+			SetExpansion(1))
+
+		// Quantity
+		a.optionsTable.SetCell(row, 5, tview.NewTableCell(" "+fmt.Sprintf("%d", o.Quantity)+" ").
+			SetTextColor(tcell.ColorWhite).
+			SetBackgroundColor(rowBg).
+			SetAlign(tview.AlignLeft).
+			SetExpansion(1))
+
+		// Premium
+		a.optionsTable.SetCell(row, 6, tview.NewTableCell(" $"+formatNumber(o.Premium.StringFixed(2))+" ").
+			SetTextColor(tcell.ColorYellow).
+			SetBackgroundColor(rowBg).
+			SetAlign(tview.AlignLeft).
+			SetExpansion(1))
+
+		// Days left
+		daysLeft := int(o.ExpiryDate.Sub(today).Hours() / 24)
+		daysColor := tcell.ColorWhite
+		if daysLeft <= 7 {
+			daysColor = tcell.ColorRed
+		} else if daysLeft <= 14 {
+			daysColor = tcell.ColorYellow
+		} else if daysLeft <= 30 {
+			daysColor = tcell.ColorOrange
+		}
+		a.optionsTable.SetCell(row, 7, tview.NewTableCell(" "+fmt.Sprintf("%d", daysLeft)+" ").
+			SetTextColor(daysColor).
+			SetBackgroundColor(rowBg).
+			SetAlign(tview.AlignLeft).
+			SetExpansion(1))
+	}
+}
+
+func (a *App) updateTimeline() {
+	if len(a.options) == 0 {
+		a.timeline.SetText(" [gray]No active options")
+		return
+	}
+
+	today := time.Now().Truncate(24 * time.Hour)
+	var timelineText string
+
+	// Group options by week
+	timelineText = " "
+	for _, o := range a.options {
+		daysLeft := int(o.ExpiryDate.Sub(today).Hours() / 24)
+
+		// Color based on days left
+		color := "white"
+		if daysLeft <= 7 {
+			color = "red"
+		} else if daysLeft <= 14 {
+			color = "yellow"
+		} else if daysLeft <= 30 {
+			color = "orange"
+		}
+
+		typeSymbol := "C"
+		if o.OptionType == "PUT" {
+			typeSymbol = "P"
+		}
+
+		timelineText += fmt.Sprintf("[%s]%s %s$%s %s (%dd)[white]  ",
+			color, o.Ticker, typeSymbol, o.Strike.StringFixed(0), o.ExpiryDate.Format("01/02"), daysLeft)
+	}
+
+	a.timeline.SetText(timelineText)
+}
+
+func (a *App) showAddOptionForm() {
+	form := tview.NewForm().
+		AddInputField("Ticker", "", 10, nil, nil).
+		AddDropDown("Type", []string{"CALL", "PUT"}, 0, nil).
+		AddDropDown("Action", []string{"BUY", "SELL"}, 0, nil).
+		AddInputField("Strike ($)", "", 15, nil, nil).
+		AddInputField("Expiry (YYYY-MM-DD)", "", 15, nil, nil).
+		AddInputField("Quantity", "1", 10, nil, nil).
+		AddInputField("Premium ($)", "", 15, nil, nil).
+		AddInputField("Notes", "", 30, nil, nil)
+
+	// Style the form
+	form.SetBackgroundColor(tcell.ColorBlack)
+	form.SetFieldBackgroundColor(tcell.ColorDarkSlateGray)
+	form.SetFieldTextColor(tcell.ColorWhite)
+	form.SetLabelColor(tcell.ColorTeal)
+	form.SetButtonBackgroundColor(tcell.ColorTeal)
+	form.SetButtonTextColor(tcell.ColorBlack)
+	form.SetBorderColor(tcell.ColorTeal)
+	form.SetTitleColor(tcell.ColorTeal)
+
+	form.AddButton("Save", func() {
+		ticker := strings.ToUpper(form.GetFormItem(0).(*tview.InputField).GetText())
+		_, optionType := form.GetFormItem(1).(*tview.DropDown).GetCurrentOption()
+		_, action := form.GetFormItem(2).(*tview.DropDown).GetCurrentOption()
+		strikeStr := form.GetFormItem(3).(*tview.InputField).GetText()
+		expiryStr := form.GetFormItem(4).(*tview.InputField).GetText()
+		qtyStr := form.GetFormItem(5).(*tview.InputField).GetText()
+		premiumStr := form.GetFormItem(6).(*tview.InputField).GetText()
+		notes := form.GetFormItem(7).(*tview.InputField).GetText()
+
+		if ticker == "" || strikeStr == "" || expiryStr == "" || premiumStr == "" {
+			a.statusBar.SetText(" [red]Ticker, Strike, Expiry, and Premium are required")
+			return
+		}
+
+		strike, err := decimal.NewFromString(strikeStr)
+		if err != nil {
+			a.statusBar.SetText(" [red]Invalid strike price")
+			return
+		}
+
+		expiry, err := time.Parse("2006-01-02", expiryStr)
+		if err != nil {
+			a.statusBar.SetText(" [red]Invalid expiry date format")
+			return
+		}
+
+		qty, err := strconv.Atoi(qtyStr)
+		if err != nil || qty < 1 {
+			a.statusBar.SetText(" [red]Invalid quantity")
+			return
+		}
+
+		premium, err := decimal.NewFromString(premiumStr)
+		if err != nil {
+			a.statusBar.SetText(" [red]Invalid premium")
+			return
+		}
+
+		ctx := context.Background()
+		if err := a.db.AddOption(ctx, ticker, optionType, action, strike, expiry, qty, premium, notes); err != nil {
+			a.statusBar.SetText(fmt.Sprintf(" [red]Error: %v", err))
+			return
+		}
+
+		a.pages.SwitchToPage("main")
+		a.pages.RemovePage("addoption")
+		a.refreshData()
+	})
+
+	form.AddButton("Cancel", func() {
+		a.pages.SwitchToPage("main")
+		a.pages.RemovePage("addoption")
+	})
+
+	form.SetBorder(true).SetTitle(" Add Option ").SetTitleAlign(tview.AlignLeft)
+
+	flex := tview.NewFlex().
+		AddItem(nil, 0, 1, false).
+		AddItem(tview.NewFlex().SetDirection(tview.FlexRow).
+			AddItem(nil, 0, 1, false).
+			AddItem(form, 18, 1, true).
+			AddItem(nil, 0, 1, false), 55, 1, true).
+		AddItem(nil, 0, 1, false)
+
+	a.pages.AddPage("addoption", flex, true, true)
+}
+
+func (a *App) showOptionActions(index int) {
+	o := a.options[index]
+
+	typeStr := o.OptionType
+	modal := tview.NewModal().
+		SetText(fmt.Sprintf("%s %s %s $%s\nExpires: %s", o.Action, o.Ticker, typeStr, o.Strike.StringFixed(2), o.ExpiryDate.Format("2006-01-02"))).
+		AddButtons([]string{"Delete", "Cancel"}).
+		SetDoneFunc(func(buttonIndex int, buttonLabel string) {
+			switch buttonLabel {
+			case "Delete":
+				a.pages.RemovePage("optionactions")
+				a.confirmDeleteOption(index)
+			default:
+				a.pages.RemovePage("optionactions")
+			}
+		})
+
+	a.pages.AddPage("optionactions", modal, true, true)
+}
+
+func (a *App) confirmDeleteOption(index int) {
+	o := a.options[index]
+
+	modal := tview.NewModal().
+		SetText(fmt.Sprintf("Delete %s %s $%s?", o.Ticker, o.OptionType, o.Strike.StringFixed(2))).
+		AddButtons([]string{"Delete", "Cancel"}).
+		SetDoneFunc(func(buttonIndex int, buttonLabel string) {
+			if buttonLabel == "Delete" {
+				ctx := context.Background()
+				if err := a.db.DeleteOption(ctx, o.ID); err != nil {
+					a.statusBar.SetText(fmt.Sprintf(" [red]Error: %v", err))
+				}
+				a.refreshData()
+			}
+			a.pages.RemovePage("confirmoption")
+		})
+
+	a.pages.AddPage("confirmoption", modal, true, true)
 }
 
 func formatNumber(s string) string {

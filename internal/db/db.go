@@ -21,6 +21,20 @@ type Holding struct {
 	UpdatedAt   time.Time
 }
 
+type Option struct {
+	ID         string
+	Ticker     string
+	OptionType string // CALL or PUT
+	Action     string // BUY or SELL
+	Strike     decimal.Decimal
+	ExpiryDate time.Time
+	Quantity   int
+	Premium    decimal.Decimal
+	Notes      string
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+}
+
 type DB struct {
 	pool *pgxpool.Pool
 }
@@ -130,5 +144,51 @@ func (d *DB) SetAvailableCash(ctx context.Context, amount decimal.Decimal) error
 		`INSERT INTO settings (key, value, updated_at) VALUES ('available_cash', $1, NOW())
 		 ON CONFLICT (key) DO UPDATE SET value = $1, updated_at = NOW()`,
 		amount.String())
+	return err
+}
+
+func (d *DB) AddOption(ctx context.Context, ticker, optionType, action string, strike decimal.Decimal, expiryDate time.Time, quantity int, premium decimal.Decimal, notes string) error {
+	_, err := d.pool.Exec(ctx,
+		`INSERT INTO options (ticker, option_type, action, strike, expiry_date, quantity, premium, notes) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+		ticker, optionType, action, strike, expiryDate, quantity, premium, notes)
+	return err
+}
+
+func (d *DB) GetActiveOptions(ctx context.Context) ([]Option, error) {
+	rows, err := d.pool.Query(ctx,
+		`SELECT id, ticker, option_type, action, strike, expiry_date, quantity, premium, notes, created_at, updated_at
+		 FROM options
+		 WHERE expiry_date >= CURRENT_DATE
+		 ORDER BY expiry_date, ticker`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var options []Option
+	for rows.Next() {
+		var o Option
+		var notes *string
+		err := rows.Scan(&o.ID, &o.Ticker, &o.OptionType, &o.Action, &o.Strike, &o.ExpiryDate, &o.Quantity, &o.Premium, &notes, &o.CreatedAt, &o.UpdatedAt)
+		if err != nil {
+			return nil, err
+		}
+		if notes != nil {
+			o.Notes = *notes
+		}
+		options = append(options, o)
+	}
+	return options, rows.Err()
+}
+
+func (d *DB) UpdateOption(ctx context.Context, id string, strike decimal.Decimal, expiryDate time.Time, quantity int, premium decimal.Decimal, notes string) error {
+	_, err := d.pool.Exec(ctx,
+		`UPDATE options SET strike = $2, expiry_date = $3, quantity = $4, premium = $5, notes = $6 WHERE id = $1`,
+		id, strike, expiryDate, quantity, premium, notes)
+	return err
+}
+
+func (d *DB) DeleteOption(ctx context.Context, id string) error {
+	_, err := d.pool.Exec(ctx, `DELETE FROM options WHERE id = $1`, id)
 	return err
 }
