@@ -31,6 +31,7 @@ type App struct {
 	options      []db.Option
 	quotes       map[string]yahoo.Quote
 	cash         decimal.Decimal
+	premiums     *db.PremiumSummary
 	focusIndex   int // 0 = holdings table, 1 = options table
 }
 
@@ -111,14 +112,14 @@ func (a *App) run() {
 	optionsSection := tview.NewFlex().
 		SetDirection(tview.FlexRow).
 		AddItem(a.optionsTable, 0, 1, false).
-		AddItem(a.timeline, 3, 0, false)
+		AddItem(a.timeline, 5, 0, false)
 
-	// Main layout - holdings gets 2x space vs options
+	// Main layout - holdings gets 3:2 space vs options
 	mainFlex := tview.NewFlex().
 		SetDirection(tview.FlexRow).
 		AddItem(a.createHeader(), 8, 0, false).
-		AddItem(a.table, 0, 2, true).
-		AddItem(optionsSection, 0, 1, false).
+		AddItem(a.table, 0, 3, true).
+		AddItem(optionsSection, 0, 2, false).
 		AddItem(a.summary, 2, 0, false).
 		AddItem(a.statusBar, 1, 0, false)
 
@@ -227,6 +228,14 @@ func (a *App) refreshData() {
 		options = []db.Option{}
 	}
 	a.options = options
+
+	// Get premium summary for current year
+	currentYear := time.Now().Year()
+	premiums, err := a.db.GetPremiumsByYear(ctx, currentYear)
+	if err != nil {
+		premiums = &db.PremiumSummary{}
+	}
+	a.premiums = premiums
 
 	// Get unique tickers
 	tickers := make([]string, 0)
@@ -835,16 +844,25 @@ func (a *App) updateOptionsTable() {
 }
 
 func (a *App) updateTimeline() {
+	currentYear := time.Now().Year()
+
+	// Premium summary line
+	premiumText := fmt.Sprintf(" [teal]%d Premiums:[white] Calls: [lime]$%s[white]  Puts: [lime]$%s[white]  Total: [yellow]$%s[white]",
+		currentYear,
+		formatNumber(a.premiums.CallPremiums.StringFixed(2)),
+		formatNumber(a.premiums.PutPremiums.StringFixed(2)),
+		formatNumber(a.premiums.TotalPremiums.StringFixed(2)))
+
 	if len(a.options) == 0 {
-		a.timeline.SetText(" [gray]No active options")
+		a.timeline.SetText(premiumText + "\n [gray]No active options")
 		return
 	}
 
 	today := time.Now().Truncate(24 * time.Hour)
 	var timelineText string
 
-	// Group options by week
-	timelineText = " "
+	// Expiration timeline
+	timelineText = "\n "
 	for _, o := range a.options {
 		daysLeft := int(o.ExpiryDate.Sub(today).Hours() / 24)
 
@@ -867,7 +885,7 @@ func (a *App) updateTimeline() {
 			color, o.Ticker, typeSymbol, o.Strike.StringFixed(0), o.ExpiryDate.Format("01/02"), daysLeft)
 	}
 
-	a.timeline.SetText(timelineText)
+	a.timeline.SetText(premiumText + timelineText)
 }
 
 func (a *App) showAddOptionForm() {

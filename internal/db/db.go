@@ -192,3 +192,37 @@ func (d *DB) DeleteOption(ctx context.Context, id string) error {
 	_, err := d.pool.Exec(ctx, `DELETE FROM options WHERE id = $1`, id)
 	return err
 }
+
+type PremiumSummary struct {
+	CallPremiums decimal.Decimal
+	PutPremiums  decimal.Decimal
+	TotalPremiums decimal.Decimal
+}
+
+func (d *DB) GetPremiumsByYear(ctx context.Context, year int) (*PremiumSummary, error) {
+	var callPremiums, putPremiums decimal.Decimal
+
+	// Get CALL premiums sold
+	err := d.pool.QueryRow(ctx,
+		`SELECT COALESCE(SUM(premium * quantity * 100), 0) FROM options
+		 WHERE action = 'SELL' AND option_type = 'CALL'
+		 AND EXTRACT(YEAR FROM created_at) = $1`, year).Scan(&callPremiums)
+	if err != nil {
+		return nil, err
+	}
+
+	// Get PUT premiums sold
+	err = d.pool.QueryRow(ctx,
+		`SELECT COALESCE(SUM(premium * quantity * 100), 0) FROM options
+		 WHERE action = 'SELL' AND option_type = 'PUT'
+		 AND EXTRACT(YEAR FROM created_at) = $1`, year).Scan(&putPremiums)
+	if err != nil {
+		return nil, err
+	}
+
+	return &PremiumSummary{
+		CallPremiums:  callPremiums,
+		PutPremiums:   putPremiums,
+		TotalPremiums: callPremiums.Add(putPremiums),
+	}, nil
+}
