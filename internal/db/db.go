@@ -22,18 +22,21 @@ type Holding struct {
 }
 
 type Option struct {
-	ID         string
-	Ticker     string
-	OptionType string // CALL or PUT
-	Action     string // BUY or SELL
-	Strike     decimal.Decimal
-	ExpiryDate time.Time
-	Quantity   int
-	Premium    decimal.Decimal
-	Status     string // ACTIVE, EXPIRED, ASSIGNED
-	Notes      string
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
+	ID           string
+	Ticker       string
+	OptionType   string // CALL or PUT
+	Action       string // BUY or SELL
+	Strike       decimal.Decimal
+	ExpiryDate   time.Time
+	Quantity     int
+	Premium      decimal.Decimal
+	OpenFee      decimal.Decimal
+	ClosePremium decimal.NullDecimal
+	CloseFee     decimal.NullDecimal
+	Status       string // ACTIVE, EXPIRED, ASSIGNED, CLOSED
+	Notes        string
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
 }
 
 type DB struct {
@@ -148,17 +151,18 @@ func (d *DB) SetAvailableCash(ctx context.Context, amount decimal.Decimal) error
 	return err
 }
 
-func (d *DB) AddOption(ctx context.Context, ticker, optionType, action string, strike decimal.Decimal, expiryDate time.Time, quantity int, premium decimal.Decimal, notes string) error {
+func (d *DB) AddOption(ctx context.Context, ticker, optionType, action string, strike decimal.Decimal, expiryDate time.Time, quantity int, premium, openFee decimal.Decimal, notes string) error {
 	// Insert the option
 	_, err := d.pool.Exec(ctx,
-		`INSERT INTO options (ticker, option_type, action, strike, expiry_date, quantity, premium, status, notes) VALUES ($1, $2, $3, $4, $5, $6, $7, 'ACTIVE', $8)`,
-		ticker, optionType, action, strike, expiryDate, quantity, premium, notes)
+		`INSERT INTO options (ticker, option_type, action, strike, expiry_date, quantity, premium, open_fee, status, notes) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'ACTIVE', $9)`,
+		ticker, optionType, action, strike, expiryDate, quantity, premium, openFee, notes)
 	if err != nil {
 		return err
 	}
 
 	// Auto-adjust cash based on action
 	// SELL = receive premium, BUY = pay premium
+	// Fees are always deducted
 	premiumTotal := premium.Mul(decimal.NewFromInt(int64(quantity))).Mul(decimal.NewFromInt(100))
 
 	currentCash, err := d.GetAvailableCash(ctx)
@@ -171,13 +175,15 @@ func (d *DB) AddOption(ctx context.Context, ticker, optionType, action string, s
 	} else {
 		currentCash = currentCash.Sub(premiumTotal)
 	}
+	// Deduct opening fee
+	currentCash = currentCash.Sub(openFee)
 
 	return d.SetAvailableCash(ctx, currentCash)
 }
 
 func (d *DB) GetActiveOptions(ctx context.Context) ([]Option, error) {
 	rows, err := d.pool.Query(ctx,
-		`SELECT id, ticker, option_type, action, strike, expiry_date, quantity, premium, status, notes, created_at, updated_at
+		`SELECT id, ticker, option_type, action, strike, expiry_date, quantity, premium, open_fee, close_premium, close_fee, status, notes, created_at, updated_at
 		 FROM options
 		 WHERE status = 'ACTIVE' AND expiry_date >= CURRENT_DATE
 		 ORDER BY expiry_date, ticker`)
@@ -189,10 +195,20 @@ func (d *DB) GetActiveOptions(ctx context.Context) ([]Option, error) {
 	var options []Option
 	for rows.Next() {
 		var o Option
+		var openFee, closePremium, closeFee *decimal.Decimal
 		var notes *string
-		err := rows.Scan(&o.ID, &o.Ticker, &o.OptionType, &o.Action, &o.Strike, &o.ExpiryDate, &o.Quantity, &o.Premium, &o.Status, &notes, &o.CreatedAt, &o.UpdatedAt)
+		err := rows.Scan(&o.ID, &o.Ticker, &o.OptionType, &o.Action, &o.Strike, &o.ExpiryDate, &o.Quantity, &o.Premium, &openFee, &closePremium, &closeFee, &o.Status, &notes, &o.CreatedAt, &o.UpdatedAt)
 		if err != nil {
 			return nil, err
+		}
+		if openFee != nil {
+			o.OpenFee = *openFee
+		}
+		if closePremium != nil {
+			o.ClosePremium = decimal.NullDecimal{Decimal: *closePremium, Valid: true}
+		}
+		if closeFee != nil {
+			o.CloseFee = decimal.NullDecimal{Decimal: *closeFee, Valid: true}
 		}
 		if notes != nil {
 			o.Notes = *notes
@@ -204,7 +220,7 @@ func (d *DB) GetActiveOptions(ctx context.Context) ([]Option, error) {
 
 func (d *DB) GetExpiredActiveOptions(ctx context.Context) ([]Option, error) {
 	rows, err := d.pool.Query(ctx,
-		`SELECT id, ticker, option_type, action, strike, expiry_date, quantity, premium, status, notes, created_at, updated_at
+		`SELECT id, ticker, option_type, action, strike, expiry_date, quantity, premium, open_fee, close_premium, close_fee, status, notes, created_at, updated_at
 		 FROM options
 		 WHERE status = 'ACTIVE' AND expiry_date < CURRENT_DATE
 		 ORDER BY expiry_date, ticker`)
@@ -216,10 +232,20 @@ func (d *DB) GetExpiredActiveOptions(ctx context.Context) ([]Option, error) {
 	var options []Option
 	for rows.Next() {
 		var o Option
+		var openFee, closePremium, closeFee *decimal.Decimal
 		var notes *string
-		err := rows.Scan(&o.ID, &o.Ticker, &o.OptionType, &o.Action, &o.Strike, &o.ExpiryDate, &o.Quantity, &o.Premium, &o.Status, &notes, &o.CreatedAt, &o.UpdatedAt)
+		err := rows.Scan(&o.ID, &o.Ticker, &o.OptionType, &o.Action, &o.Strike, &o.ExpiryDate, &o.Quantity, &o.Premium, &openFee, &closePremium, &closeFee, &o.Status, &notes, &o.CreatedAt, &o.UpdatedAt)
 		if err != nil {
 			return nil, err
+		}
+		if openFee != nil {
+			o.OpenFee = *openFee
+		}
+		if closePremium != nil {
+			o.ClosePremium = decimal.NullDecimal{Decimal: *closePremium, Valid: true}
+		}
+		if closeFee != nil {
+			o.CloseFee = decimal.NullDecimal{Decimal: *closeFee, Valid: true}
 		}
 		if notes != nil {
 			o.Notes = *notes
@@ -243,6 +269,47 @@ func (d *DB) DeleteOption(ctx context.Context, id string) error {
 
 func (d *DB) ExpireOption(ctx context.Context, id string) error {
 	_, err := d.pool.Exec(ctx, `UPDATE options SET status = 'EXPIRED' WHERE id = $1`, id)
+	return err
+}
+
+func (d *DB) CloseOption(ctx context.Context, id string, closePremium, closeFee decimal.Decimal) error {
+	// Get the option details first
+	var o Option
+	var notes *string
+	err := d.pool.QueryRow(ctx,
+		`SELECT id, ticker, option_type, action, strike, expiry_date, quantity, premium, status, notes FROM options WHERE id = $1`, id).
+		Scan(&o.ID, &o.Ticker, &o.OptionType, &o.Action, &o.Strike, &o.ExpiryDate, &o.Quantity, &o.Premium, &o.Status, &notes)
+	if err != nil {
+		return err
+	}
+
+	// Calculate cash adjustment
+	// If originally SELL: we received premium, now we pay closePremium to close
+	// If originally BUY: we paid premium, now we receive closePremium to close
+	closeCost := closePremium.Mul(decimal.NewFromInt(int64(o.Quantity))).Mul(decimal.NewFromInt(100))
+
+	currentCash, err := d.GetAvailableCash(ctx)
+	if err != nil {
+		currentCash = decimal.Zero
+	}
+
+	if o.Action == "SELL" {
+		// Sold option, buying back to close = pay premium
+		currentCash = currentCash.Sub(closeCost)
+	} else {
+		// Bought option, selling to close = receive premium
+		currentCash = currentCash.Add(closeCost)
+	}
+	// Deduct closing fee
+	currentCash = currentCash.Sub(closeFee)
+
+	err = d.SetAvailableCash(ctx, currentCash)
+	if err != nil {
+		return err
+	}
+
+	// Mark option as closed with close premium and fee
+	_, err = d.pool.Exec(ctx, `UPDATE options SET status = 'CLOSED', close_premium = $2, close_fee = $3 WHERE id = $1`, id, closePremium, closeFee)
 	return err
 }
 

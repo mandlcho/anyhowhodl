@@ -740,7 +740,7 @@ func (a *App) updateOptionsTable() {
 	a.optionsTable.Clear()
 
 	// Header row
-	headers := []string{"TICKER", "TYPE", "ACTION", "STRIKE", "EXPIRY", "QTY", "PREMIUM", "DAYS LEFT"}
+	headers := []string{"TICKER", "TYPE", "ACTION", "STRIKE", "EXPIRY", "QTY", "PREMIUM", "FEE", "DAYS"}
 	for i, h := range headers {
 		cell := tview.NewTableCell(" "+h+" ").
 			SetTextColor(tcell.ColorBlack).
@@ -814,6 +814,17 @@ func (a *App) updateOptionsTable() {
 			SetAlign(tview.AlignLeft).
 			SetExpansion(1))
 
+		// Fee
+		feeText := " - "
+		if !o.OpenFee.IsZero() {
+			feeText = " $" + formatNumber(o.OpenFee.StringFixed(2)) + " "
+		}
+		a.optionsTable.SetCell(row, 7, tview.NewTableCell(feeText).
+			SetTextColor(tcell.ColorOrange).
+			SetBackgroundColor(rowBg).
+			SetAlign(tview.AlignLeft).
+			SetExpansion(1))
+
 		// Days left
 		daysLeft := int(o.ExpiryDate.Sub(today).Hours() / 24)
 		daysColor := tcell.ColorWhite
@@ -824,7 +835,7 @@ func (a *App) updateOptionsTable() {
 		} else if daysLeft <= 30 {
 			daysColor = tcell.ColorOrange
 		}
-		a.optionsTable.SetCell(row, 7, tview.NewTableCell(" "+fmt.Sprintf("%d", daysLeft)+" ").
+		a.optionsTable.SetCell(row, 8, tview.NewTableCell(" "+fmt.Sprintf("%d", daysLeft)+" ").
 			SetTextColor(daysColor).
 			SetBackgroundColor(rowBg).
 			SetAlign(tview.AlignLeft).
@@ -897,6 +908,7 @@ func (a *App) showAddOptionForm() {
 		AddInputField("Expiry (YYYY-MM-DD)", "", 15, nil, nil).
 		AddInputField("Quantity", "1", 10, nil, nil).
 		AddInputField("Premium ($)", "", 15, nil, nil).
+		AddInputField("Fee ($)", "0", 10, nil, nil).
 		AddInputField("Notes", "", 30, nil, nil)
 
 	// Style the form
@@ -917,7 +929,8 @@ func (a *App) showAddOptionForm() {
 		expiryStr := form.GetFormItem(4).(*tview.InputField).GetText()
 		qtyStr := form.GetFormItem(5).(*tview.InputField).GetText()
 		premiumStr := form.GetFormItem(6).(*tview.InputField).GetText()
-		notes := form.GetFormItem(7).(*tview.InputField).GetText()
+		feeStr := form.GetFormItem(7).(*tview.InputField).GetText()
+		notes := form.GetFormItem(8).(*tview.InputField).GetText()
 
 		if ticker == "" || strikeStr == "" || expiryStr == "" || premiumStr == "" {
 			a.statusBar.SetText(" [red]Ticker, Strike, Expiry, and Premium are required")
@@ -948,8 +961,17 @@ func (a *App) showAddOptionForm() {
 			return
 		}
 
+		openFee := decimal.Zero
+		if feeStr != "" {
+			openFee, err = decimal.NewFromString(feeStr)
+			if err != nil {
+				a.statusBar.SetText(" [red]Invalid fee")
+				return
+			}
+		}
+
 		ctx := context.Background()
-		if err := a.db.AddOption(ctx, ticker, optionType, action, strike, expiry, qty, premium, notes); err != nil {
+		if err := a.db.AddOption(ctx, ticker, optionType, action, strike, expiry, qty, premium, openFee, notes); err != nil {
 			a.statusBar.SetText(fmt.Sprintf(" [red]Error: %v", err))
 			return
 		}
@@ -966,7 +988,7 @@ func (a *App) showAddOptionForm() {
 
 	form.SetBorder(true).SetTitle(" Add Option ").SetTitleAlign(tview.AlignLeft)
 
-	a.createModalPage("addoption", form, 55, 18)
+	a.createModalPage("addoption", form, 55, 20)
 }
 
 func (a *App) showOptionActions(index int) {
@@ -980,9 +1002,12 @@ func (a *App) showOptionActions(index int) {
 
 	modal := tview.NewModal().
 		SetText(fmt.Sprintf("%s %s %s $%s\nExpires: %s\n\nAssign: %s", o.Action, o.Ticker, typeStr, o.Strike.StringFixed(2), o.ExpiryDate.Format("2006-01-02"), actionDesc)).
-		AddButtons([]string{"Assign", "Expire", "Delete", "Cancel"}).
+		AddButtons([]string{"Close", "Assign", "Expire", "Delete", "Cancel"}).
 		SetDoneFunc(func(buttonIndex int, buttonLabel string) {
 			switch buttonLabel {
+			case "Close":
+				a.pages.RemovePage("optionactions")
+				a.showCloseOptionForm(index)
 			case "Assign":
 				a.pages.RemovePage("optionactions")
 				a.confirmAssignOption(index)
@@ -1074,6 +1099,74 @@ func (a *App) confirmExpireOption(index int) {
 		})
 
 	a.pages.AddPage("confirmexpire", modal, true, true)
+}
+
+func (a *App) showCloseOptionForm(index int) {
+	o := a.options[index]
+
+	closeAction := "Buy back"
+	if o.Action == "BUY" {
+		closeAction = "Sell"
+	}
+
+	form := tview.NewForm().
+		AddInputField("Close Premium ($)", "", 15, nil, nil).
+		AddInputField("Close Fee ($)", "0", 10, nil, nil)
+
+	// Style the form
+	form.SetBackgroundColor(tcell.ColorBlack)
+	form.SetFieldBackgroundColor(tcell.ColorDarkSlateGray)
+	form.SetFieldTextColor(tcell.ColorWhite)
+	form.SetLabelColor(tcell.ColorTeal)
+	form.SetButtonBackgroundColor(tcell.ColorTeal)
+	form.SetButtonTextColor(tcell.ColorBlack)
+	form.SetBorderColor(tcell.ColorTeal)
+	form.SetTitleColor(tcell.ColorTeal)
+
+	form.AddButton("Close Position", func() {
+		closePremiumStr := form.GetFormItem(0).(*tview.InputField).GetText()
+		closeFeeStr := form.GetFormItem(1).(*tview.InputField).GetText()
+
+		if closePremiumStr == "" {
+			a.statusBar.SetText(" [red]Close premium is required")
+			return
+		}
+
+		closePremium, err := decimal.NewFromString(closePremiumStr)
+		if err != nil {
+			a.statusBar.SetText(" [red]Invalid close premium")
+			return
+		}
+
+		closeFee := decimal.Zero
+		if closeFeeStr != "" {
+			closeFee, err = decimal.NewFromString(closeFeeStr)
+			if err != nil {
+				a.statusBar.SetText(" [red]Invalid close fee")
+				return
+			}
+		}
+
+		ctx := context.Background()
+		if err := a.db.CloseOption(ctx, o.ID, closePremium, closeFee); err != nil {
+			a.statusBar.SetText(fmt.Sprintf(" [red]Error: %v", err))
+			return
+		}
+
+		a.statusBar.SetText(fmt.Sprintf(" [green]Position closed: %s %s", o.Ticker, o.OptionType))
+		a.pages.SwitchToPage("main")
+		a.pages.RemovePage("closeoption")
+		a.refreshData()
+	})
+
+	form.AddButton("Cancel", func() {
+		a.pages.SwitchToPage("main")
+		a.pages.RemovePage("closeoption")
+	})
+
+	form.SetBorder(true).SetTitle(fmt.Sprintf(" %s %s %s $%s ", closeAction, o.Ticker, o.OptionType, o.Strike.StringFixed(2))).SetTitleAlign(tview.AlignLeft)
+
+	a.createModalPage("closeoption", form, 50, 10)
 }
 
 func (a *App) processExpiredOptions(ctx context.Context) {
