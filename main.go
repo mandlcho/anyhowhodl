@@ -177,6 +177,12 @@ func (a *App) run() {
 			return event
 		}
 
+		// Ctrl+C to quit
+		if event.Key() == tcell.KeyCtrlC {
+			a.app.Stop()
+			return nil
+		}
+
 		// Tab to switch focus between tables
 		if event.Key() == tcell.KeyTab {
 			a.focusIndex = (a.focusIndex + 1) % 2
