@@ -347,6 +347,26 @@ func (a *App) updateLayout() {
 		AddItem(a.summary, 3, 0, false).
 		AddItem(a.table, tableHeight, 0, false)
 
+	// Calculate timeline height based on active options count
+	numActiveOptions := 0
+	for _, o := range a.options {
+		if o.Status == "ACTIVE" {
+			numActiveOptions++
+		}
+	}
+	// Timeline needs: border (2) + header row (1) + one line per option
+	timelineHeight := numActiveOptions + 3
+	if timelineHeight < 4 {
+		timelineHeight = 4
+	}
+
+	// Rebuild options section with fixed timeline height
+	a.optionsSection.Clear()
+	a.optionsSection.
+		AddItem(a.timeline, 3, 0, false).
+		AddItem(a.optionsTable, 0, 1, false).
+		AddItem(a.expiryTimeline, timelineHeight, 0, false)
+
 	// Rebuild main flex with fixed holdings height, options takes rest
 	a.mainFlex.Clear()
 	a.mainFlex.
