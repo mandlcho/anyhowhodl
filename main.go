@@ -18,24 +18,27 @@ import (
 )
 
 type App struct {
-	db             *db.DB
-	yahoo          *yahoo.Client
-	app            *tview.Application
-	pages          *tview.Pages
-	table          *tview.Table
-	optionsTable   *tview.Table
-	timeline       *tview.TextView // Premium stats
-	expiryTimeline *tview.TextView // Visual expiry timeline
-	statusBar      *tview.TextView
-	summary        *tview.TextView
-	holdings       []db.Holding
-	options        []db.Option
-	quotes         map[string]yahoo.Quote
-	cash           decimal.Decimal
-	premiums       *db.PremiumSummary
-	focusIndex     int       // 0 = holdings table, 1 = options table
-	lastEscTime    time.Time // For double-ESC to quit
-	weeklyView     bool      // Toggle between weekly and monthly timeline view
+	db              *db.DB
+	yahoo           *yahoo.Client
+	app             *tview.Application
+	pages           *tview.Pages
+	table           *tview.Table
+	optionsTable    *tview.Table
+	timeline        *tview.TextView // Premium stats
+	expiryTimeline  *tview.TextView // Visual expiry timeline
+	statusBar       *tview.TextView
+	summary         *tview.TextView
+	holdingsSection *tview.Flex
+	optionsSection  *tview.Flex
+	mainFlex        *tview.Flex
+	holdings        []db.Holding
+	options         []db.Option
+	quotes          map[string]yahoo.Quote
+	cash            decimal.Decimal
+	premiums        *db.PremiumSummary
+	focusIndex      int       // 0 = holdings table, 1 = options table
+	lastEscTime     time.Time // For double-ESC to quit
+	weeklyView      bool      // Toggle between weekly and monthly timeline view
 }
 
 func main() {
@@ -127,29 +130,29 @@ func (a *App) run() {
 	a.summary = tview.NewTextView().SetDynamicColors(true)
 	a.summary.SetBorder(true).SetTitle(" Portfolio ").SetTitleAlign(tview.AlignLeft).SetBorderColor(tcell.ColorTeal)
 
-	// Holdings section (summary on top, then table)
-	holdingsSection := tview.NewFlex().
+	// Holdings section (summary on top, then table) - will be auto-sized
+	a.holdingsSection = tview.NewFlex().
 		SetDirection(tview.FlexRow).
 		AddItem(a.summary, 3, 0, false).
 		AddItem(a.table, 0, 1, true)
 
 	// Options section (stats on top, then table, then timeline)
-	optionsSection := tview.NewFlex().
+	a.optionsSection = tview.NewFlex().
 		SetDirection(tview.FlexRow).
 		AddItem(a.timeline, 3, 0, false).
 		AddItem(a.optionsTable, 0, 1, false).
 		AddItem(a.expiryTimeline, 0, 1, false)
 
-	// Main layout - more space for options (1:2 ratio)
-	mainFlex := tview.NewFlex().
+	// Main layout - holdings auto-sized, options takes remaining space
+	a.mainFlex = tview.NewFlex().
 		SetDirection(tview.FlexRow).
 		AddItem(a.createHeader(), 8, 0, false).
-		AddItem(holdingsSection, 0, 1, true).
-		AddItem(optionsSection, 0, 2, false).
+		AddItem(a.holdingsSection, 0, 1, true).
+		AddItem(a.optionsSection, 0, 2, false).
 		AddItem(a.statusBar, 1, 0, false)
 
 	a.pages = tview.NewPages().
-		AddPage("main", mainFlex, true, true)
+		AddPage("main", a.mainFlex, true, true)
 
 	// Key bindings
 	a.app.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
@@ -316,7 +319,40 @@ func (a *App) refreshData() {
 	a.updateTable()
 	a.updateOptionsTable()
 	a.updateTimeline()
-	a.statusBar.SetText(" [yellow]a[white]:Add Holding  [yellow]o[white]:Add Option  [yellow]c[white]:Cash  [yellow]Tab[white]:Switch  [yellow]d[white]:Delete  [yellow]r[white]:Refresh  [yellow]q[white]:Quit")
+	a.updateLayout()
+	a.statusBar.SetText(" [yellow]a[white]:Add Holding  [yellow]o[white]:Add Option  [yellow]c[white]:Cash  [yellow]Tab[white]:Switch  [yellow]d[white]:Delete  [yellow]r[white]:Refresh  [yellow]w[white]:Week/Month  [yellow]q[white]:Quit")
+}
+
+func (a *App) updateLayout() {
+	// Calculate holdings section height:
+	// - Summary bar: 3 rows (with border)
+	// - Table header: 1 row
+	// - Table rows: len(holdings)
+	// - Table border: 2 rows
+	// - Empty space: 1 row
+	holdingsHeight := 3 + 1 + len(a.holdings) + 2 + 1
+	if holdingsHeight < 8 {
+		holdingsHeight = 8 // Minimum height
+	}
+
+	// Rebuild holdings section with fixed table height
+	tableHeight := len(a.holdings) + 3 // rows + header + border
+	if tableHeight < 5 {
+		tableHeight = 5
+	}
+
+	a.holdingsSection.Clear()
+	a.holdingsSection.
+		AddItem(a.summary, 3, 0, false).
+		AddItem(a.table, tableHeight, 0, true)
+
+	// Rebuild main flex with fixed holdings height
+	a.mainFlex.Clear()
+	a.mainFlex.
+		AddItem(a.createHeader(), 8, 0, false).
+		AddItem(a.holdingsSection, holdingsHeight, 0, true).
+		AddItem(a.optionsSection, 0, 1, false).
+		AddItem(a.statusBar, 1, 0, false)
 }
 
 func (a *App) updateTable() {
