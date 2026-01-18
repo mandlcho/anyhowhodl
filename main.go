@@ -18,22 +18,23 @@ import (
 )
 
 type App struct {
-	db           *db.DB
-	yahoo        *yahoo.Client
-	app          *tview.Application
-	pages        *tview.Pages
-	table        *tview.Table
-	optionsTable *tview.Table
-	timeline     *tview.TextView
-	statusBar    *tview.TextView
-	summary      *tview.TextView
-	holdings     []db.Holding
-	options      []db.Option
-	quotes       map[string]yahoo.Quote
-	cash         decimal.Decimal
-	premiums     *db.PremiumSummary
-	focusIndex   int       // 0 = holdings table, 1 = options table
-	lastEscTime  time.Time // For double-ESC to quit
+	db             *db.DB
+	yahoo          *yahoo.Client
+	app            *tview.Application
+	pages          *tview.Pages
+	table          *tview.Table
+	optionsTable   *tview.Table
+	timeline       *tview.TextView // Premium stats
+	expiryTimeline *tview.TextView // Visual expiry timeline
+	statusBar      *tview.TextView
+	summary        *tview.TextView
+	holdings       []db.Holding
+	options        []db.Option
+	quotes         map[string]yahoo.Quote
+	cash           decimal.Decimal
+	premiums       *db.PremiumSummary
+	focusIndex     int       // 0 = holdings table, 1 = options table
+	lastEscTime    time.Time // For double-ESC to quit
 }
 
 func main() {
@@ -104,11 +105,17 @@ func (a *App) run() {
 		}
 	})
 
-	// Timeline view
+	// Premium stats view
 	a.timeline = tview.NewTextView().
 		SetDynamicColors(true).
 		SetTextAlign(tview.AlignLeft)
-	a.timeline.SetBorder(true).SetTitle(" Expiration Timeline ").SetTitleAlign(tview.AlignLeft).SetBorderColor(tcell.ColorTeal)
+	a.timeline.SetBorder(true).SetTitle(" Option Premium Stats ").SetTitleAlign(tview.AlignLeft).SetBorderColor(tcell.ColorTeal)
+
+	// Visual expiry timeline
+	a.expiryTimeline = tview.NewTextView().
+		SetDynamicColors(true).
+		SetTextAlign(tview.AlignLeft)
+	a.expiryTimeline.SetBorder(true).SetTitle(" Expiry Timeline ").SetTitleAlign(tview.AlignLeft).SetBorderColor(tcell.ColorTeal)
 
 	// Status bar
 	a.statusBar = tview.NewTextView().
@@ -118,11 +125,12 @@ func (a *App) run() {
 	// Summary bar
 	a.summary = tview.NewTextView().SetDynamicColors(true)
 
-	// Options section (table + timeline)
+	// Options section (table + stats + timeline)
 	optionsSection := tview.NewFlex().
 		SetDirection(tview.FlexRow).
 		AddItem(a.optionsTable, 0, 1, false).
-		AddItem(a.timeline, 5, 0, false)
+		AddItem(a.timeline, 3, 0, false).
+		AddItem(a.expiryTimeline, 5, 0, false)
 
 	// Main layout - holdings gets 3:2 space vs options
 	mainFlex := tview.NewFlex().
@@ -923,23 +931,79 @@ func (a *App) updateTimeline() {
 	}
 	premiumText += fmt.Sprintf("  Net: [%s]$%s[white]", netColor, formatNumber(a.premiums.NetPL.StringFixed(2)))
 
-	if len(a.options) == 0 {
-		a.timeline.SetText(premiumText + "\n [gray]No active options")
+	a.timeline.SetText(premiumText)
+
+	// Update the visual expiry timeline
+	a.updateExpiryTimeline()
+}
+
+func (a *App) updateExpiryTimeline() {
+	today := time.Now().Truncate(24 * time.Hour)
+
+	// Collect active options
+	var activeOptions []db.Option
+	for _, o := range a.options {
+		if o.Status == "ACTIVE" {
+			activeOptions = append(activeOptions, o)
+		}
+	}
+
+	if len(activeOptions) == 0 {
+		a.expiryTimeline.SetText(" [gray]No active options")
 		return
 	}
 
-	today := time.Now().Truncate(24 * time.Hour)
-	var timelineText string
-
-	// Expiration timeline - only show ACTIVE options
-	timelineText = "\n "
-	activeCount := 0
-	for _, o := range a.options {
-		if o.Status != "ACTIVE" {
-			continue
+	// Find the range (today to furthest expiry)
+	maxDays := 0
+	for _, o := range activeOptions {
+		days := int(o.ExpiryDate.Sub(today).Hours() / 24)
+		if days > maxDays {
+			maxDays = days
 		}
-		activeCount++
+	}
+
+	// Ensure minimum range of 30 days for readability
+	if maxDays < 30 {
+		maxDays = 30
+	}
+
+	// Timeline width (characters) - leave room for labels
+	timelineWidth := 80
+
+	// Build the timeline
+	// Line 1: Date markers
+	// Line 2: Timeline bar with option markers
+	// Line 3: Option labels
+
+	// Create date markers
+	dateMarkers := make([]byte, timelineWidth)
+	for i := range dateMarkers {
+		dateMarkers[i] = ' '
+	}
+
+	// Track positions for labels
+	type optionMarker struct {
+		pos      int
+		label    string
+		color    string
+		daysLeft int
+	}
+	var markers []optionMarker
+
+	// Map positions to markers
+	positionMap := make(map[int]string)
+
+	for _, o := range activeOptions {
 		daysLeft := int(o.ExpiryDate.Sub(today).Hours() / 24)
+		if daysLeft < 0 {
+			daysLeft = 0
+		}
+
+		// Calculate position on timeline
+		pos := (daysLeft * (timelineWidth - 1)) / maxDays
+		if pos >= timelineWidth {
+			pos = timelineWidth - 1
+		}
 
 		// Color based on days left
 		color := "white"
@@ -956,16 +1020,40 @@ func (a *App) updateTimeline() {
 			typeSymbol = "P"
 		}
 
-		timelineText += fmt.Sprintf("[%s]%s %s$%s %s (%dd)[white]  ",
-			color, o.Ticker, typeSymbol, o.Strike.StringFixed(0), o.ExpiryDate.Format("01/02"), daysLeft)
+		label := fmt.Sprintf("%s%s", o.Ticker, typeSymbol)
+		markers = append(markers, optionMarker{pos: pos, label: label, color: color, daysLeft: daysLeft})
+		positionMap[pos] = color
 	}
 
-	if activeCount == 0 {
-		a.timeline.SetText(premiumText + "\n [gray]No active options")
-		return
+	// Build output
+	var output string
+
+	// Today and end date labels
+	endDate := today.AddDate(0, 0, maxDays)
+	output = fmt.Sprintf(" [aqua]Today[white]%s[aqua]%s[white]\n",
+		strings.Repeat(" ", timelineWidth-12),
+		endDate.Format("Jan 02"))
+
+	// Timeline bar with colored markers
+	output += " "
+	for i := 0; i < timelineWidth; i++ {
+		if color, hasMarker := positionMap[i]; hasMarker {
+			output += fmt.Sprintf("[%s]●[white]", color)
+		} else if i == 0 {
+			output += "[aqua]|[white]"
+		} else {
+			output += "[gray]-[white]"
+		}
+	}
+	output += "\n"
+
+	// Option labels below
+	output += " "
+	for _, m := range markers {
+		output += fmt.Sprintf("[%s]%s(%dd)[white]  ", m.color, m.label, m.daysLeft)
 	}
 
-	a.timeline.SetText(premiumText + timelineText)
+	a.expiryTimeline.SetText(output)
 }
 
 func (a *App) showAddOptionForm() {
@@ -1074,9 +1162,12 @@ func (a *App) showOptionActions(index int) {
 
 	modal := tview.NewModal().
 		SetText(fmt.Sprintf("%s %s %s $%s\nExpires: %s\n\nAssign: %s", o.Action, o.Ticker, typeStr, o.Strike.StringFixed(2), o.ExpiryDate.Format("2006-01-02"), actionDesc)).
-		AddButtons([]string{"Close", "Assign", "Expire", "Delete", "Cancel"}).
+		AddButtons([]string{"Edit", "Close", "Assign", "Expire", "Delete", "Cancel"}).
 		SetDoneFunc(func(buttonIndex int, buttonLabel string) {
 			switch buttonLabel {
+			case "Edit":
+				a.pages.RemovePage("optionactions")
+				a.showEditOptionForm(index)
 			case "Close":
 				a.pages.RemovePage("optionactions")
 				a.showCloseOptionForm(index)
@@ -1095,6 +1186,71 @@ func (a *App) showOptionActions(index int) {
 		})
 
 	a.pages.AddPage("optionactions", modal, true, true)
+}
+
+func (a *App) showEditOptionForm(index int) {
+	o := a.options[index]
+
+	form := tview.NewForm().
+		AddInputField("Strike ($)", o.Strike.String(), 15, nil, nil).
+		AddInputField("Expiry (YYYY-MM-DD)", o.ExpiryDate.Format("2006-01-02"), 15, nil, nil).
+		AddInputField("Quantity", fmt.Sprintf("%d", o.Quantity), 10, nil, nil).
+		AddInputField("Premium ($)", o.Premium.String(), 15, nil, nil).
+		AddInputField("Notes", o.Notes, 30, nil, nil)
+
+	styleForm(form)
+
+	form.AddButton("Save", func() {
+		strikeStr := form.GetFormItem(0).(*tview.InputField).GetText()
+		expiryStr := form.GetFormItem(1).(*tview.InputField).GetText()
+		qtyStr := form.GetFormItem(2).(*tview.InputField).GetText()
+		premiumStr := form.GetFormItem(3).(*tview.InputField).GetText()
+		notes := form.GetFormItem(4).(*tview.InputField).GetText()
+
+		strike, err := decimal.NewFromString(strikeStr)
+		if err != nil {
+			a.statusBar.SetText(" [red]Invalid strike price")
+			return
+		}
+
+		expiry, err := time.Parse("2006-01-02", expiryStr)
+		if err != nil {
+			a.statusBar.SetText(" [red]Invalid expiry date format")
+			return
+		}
+
+		qty, err := strconv.Atoi(qtyStr)
+		if err != nil || qty < 1 {
+			a.statusBar.SetText(" [red]Invalid quantity")
+			return
+		}
+
+		premium, err := decimal.NewFromString(premiumStr)
+		if err != nil {
+			a.statusBar.SetText(" [red]Invalid premium")
+			return
+		}
+
+		ctx := context.Background()
+		if err := a.db.UpdateOption(ctx, o.ID, strike, expiry, qty, premium, notes); err != nil {
+			a.statusBar.SetText(fmt.Sprintf(" [red]Error: %v", err))
+			return
+		}
+
+		a.statusBar.SetText(fmt.Sprintf(" [green]Updated: %s %s $%s", o.Ticker, o.OptionType, strike.StringFixed(2)))
+		a.pages.SwitchToPage("main")
+		a.pages.RemovePage("editoption")
+		a.refreshData()
+	})
+
+	form.AddButton("Cancel", func() {
+		a.pages.SwitchToPage("main")
+		a.pages.RemovePage("editoption")
+	})
+
+	form.SetBorder(true).SetTitle(fmt.Sprintf(" Edit %s %s %s ", o.Action, o.Ticker, o.OptionType)).SetTitleAlign(tview.AlignLeft)
+
+	a.createModalPage("editoption", form, 55, 16)
 }
 
 func (a *App) confirmDeleteOption(index int) {
