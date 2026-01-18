@@ -256,10 +256,10 @@ func (d *DB) GetExpiredActiveOptions(ctx context.Context) ([]Option, error) {
 	return options, rows.Err()
 }
 
-func (d *DB) UpdateOption(ctx context.Context, id string, strike decimal.Decimal, expiryDate time.Time, quantity int, premium decimal.Decimal, notes string) error {
+func (d *DB) UpdateOption(ctx context.Context, id string, strike decimal.Decimal, expiryDate time.Time, quantity int, premium, openFee decimal.Decimal, notes string) error {
 	_, err := d.pool.Exec(ctx,
-		`UPDATE options SET strike = $2, expiry_date = $3, quantity = $4, premium = $5, notes = $6 WHERE id = $1`,
-		id, strike, expiryDate, quantity, premium, notes)
+		`UPDATE options SET strike = $2, expiry_date = $3, quantity = $4, premium = $5, open_fee = $6, notes = $7 WHERE id = $1`,
+		id, strike, expiryDate, quantity, premium, openFee, notes)
 	return err
 }
 

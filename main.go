@@ -1196,6 +1196,7 @@ func (a *App) showEditOptionForm(index int) {
 		AddInputField("Expiry (YYYY-MM-DD)", o.ExpiryDate.Format("2006-01-02"), 15, nil, nil).
 		AddInputField("Quantity", fmt.Sprintf("%d", o.Quantity), 10, nil, nil).
 		AddInputField("Premium ($)", o.Premium.String(), 15, nil, nil).
+		AddInputField("Fee ($)", o.OpenFee.String(), 10, nil, nil).
 		AddInputField("Notes", o.Notes, 30, nil, nil)
 
 	styleForm(form)
@@ -1205,7 +1206,8 @@ func (a *App) showEditOptionForm(index int) {
 		expiryStr := form.GetFormItem(1).(*tview.InputField).GetText()
 		qtyStr := form.GetFormItem(2).(*tview.InputField).GetText()
 		premiumStr := form.GetFormItem(3).(*tview.InputField).GetText()
-		notes := form.GetFormItem(4).(*tview.InputField).GetText()
+		feeStr := form.GetFormItem(4).(*tview.InputField).GetText()
+		notes := form.GetFormItem(5).(*tview.InputField).GetText()
 
 		strike, err := decimal.NewFromString(strikeStr)
 		if err != nil {
@@ -1231,8 +1233,17 @@ func (a *App) showEditOptionForm(index int) {
 			return
 		}
 
+		fee := decimal.Zero
+		if feeStr != "" {
+			fee, err = decimal.NewFromString(feeStr)
+			if err != nil {
+				a.statusBar.SetText(" [red]Invalid fee")
+				return
+			}
+		}
+
 		ctx := context.Background()
-		if err := a.db.UpdateOption(ctx, o.ID, strike, expiry, qty, premium, notes); err != nil {
+		if err := a.db.UpdateOption(ctx, o.ID, strike, expiry, qty, premium, fee, notes); err != nil {
 			a.statusBar.SetText(fmt.Sprintf(" [red]Error: %v", err))
 			return
 		}
@@ -1250,7 +1261,7 @@ func (a *App) showEditOptionForm(index int) {
 
 	form.SetBorder(true).SetTitle(fmt.Sprintf(" Edit %s %s %s ", o.Action, o.Ticker, o.OptionType)).SetTitleAlign(tview.AlignLeft)
 
-	a.createModalPage("editoption", form, 55, 16)
+	a.createModalPage("editoption", form, 55, 18)
 }
 
 func (a *App) confirmDeleteOption(index int) {
