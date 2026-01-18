@@ -130,7 +130,7 @@ func (a *App) run() {
 		SetDirection(tview.FlexRow).
 		AddItem(a.optionsTable, 0, 1, false).
 		AddItem(a.timeline, 3, 0, false).
-		AddItem(a.expiryTimeline, 5, 0, false)
+		AddItem(a.expiryTimeline, 0, 1, false)
 
 	// Main layout - holdings gets 3:2 space vs options
 	mainFlex := tview.NewFlex().
@@ -953,57 +953,44 @@ func (a *App) updateExpiryTimeline() {
 		return
 	}
 
-	// Find the range (today to furthest expiry)
-	maxDays := 0
-	for _, o := range activeOptions {
-		days := int(o.ExpiryDate.Sub(today).Hours() / 24)
-		if days > maxDays {
-			maxDays = days
+	// Sort options by expiry date
+	for i := 0; i < len(activeOptions)-1; i++ {
+		for j := i + 1; j < len(activeOptions); j++ {
+			if activeOptions[i].ExpiryDate.After(activeOptions[j].ExpiryDate) {
+				activeOptions[i], activeOptions[j] = activeOptions[j], activeOptions[i]
+			}
 		}
 	}
 
-	// Ensure minimum range of 30 days for readability
-	if maxDays < 30 {
-		maxDays = 30
+	// Build monthly timeline (show 6 months)
+	numMonths := 6
+	monthWidth := 10 // characters per month column
+	labelWidth := 18 // width for contract labels
+
+	// Generate month headers starting from current month
+	currentMonth := time.Date(today.Year(), today.Month(), 1, 0, 0, 0, 0, time.Local)
+
+	var output string
+
+	// Header row with months
+	output = fmt.Sprintf(" [teal]%-*s[white]", labelWidth, "CONTRACT")
+	for i := 0; i < numMonths; i++ {
+		m := currentMonth.AddDate(0, i, 0)
+		monthLabel := m.Format("Jan 06")
+		output += fmt.Sprintf("[aqua]%-*s[white]", monthWidth, monthLabel)
 	}
+	output += "\n"
 
-	// Timeline width (characters) - leave room for labels
-	timelineWidth := 80
-
-	// Build the timeline
-	// Line 1: Date markers
-	// Line 2: Timeline bar with option markers
-	// Line 3: Option labels
-
-	// Create date markers
-	dateMarkers := make([]byte, timelineWidth)
-	for i := range dateMarkers {
-		dateMarkers[i] = ' '
+	// Separator line
+	output += " " + strings.Repeat("-", labelWidth-1)
+	for i := 0; i < numMonths; i++ {
+		output += "+" + strings.Repeat("-", monthWidth-1)
 	}
+	output += "\n"
 
-	// Track positions for labels
-	type optionMarker struct {
-		pos      int
-		label    string
-		color    string
-		daysLeft int
-	}
-	var markers []optionMarker
-
-	// Map positions to markers
-	positionMap := make(map[int]string)
-
+	// Each contract gets its own row
 	for _, o := range activeOptions {
 		daysLeft := int(o.ExpiryDate.Sub(today).Hours() / 24)
-		if daysLeft < 0 {
-			daysLeft = 0
-		}
-
-		// Calculate position on timeline
-		pos := (daysLeft * (timelineWidth - 1)) / maxDays
-		if pos >= timelineWidth {
-			pos = timelineWidth - 1
-		}
 
 		// Color based on days left
 		color := "white"
@@ -1013,44 +1000,47 @@ func (a *App) updateExpiryTimeline() {
 			color = "yellow"
 		} else if daysLeft <= 30 {
 			color = "orange"
+		} else {
+			color = "lime"
 		}
 
+		// Contract label
 		typeSymbol := "C"
 		if o.OptionType == "PUT" {
 			typeSymbol = "P"
 		}
-
-		label := fmt.Sprintf("%s%s", o.Ticker, typeSymbol)
-		markers = append(markers, optionMarker{pos: pos, label: label, color: color, daysLeft: daysLeft})
-		positionMap[pos] = color
-	}
-
-	// Build output
-	var output string
-
-	// Today and end date labels
-	endDate := today.AddDate(0, 0, maxDays)
-	output = fmt.Sprintf(" [aqua]Today[white]%s[aqua]%s[white]\n",
-		strings.Repeat(" ", timelineWidth-12),
-		endDate.Format("Jan 02"))
-
-	// Timeline bar with colored markers
-	output += " "
-	for i := 0; i < timelineWidth; i++ {
-		if color, hasMarker := positionMap[i]; hasMarker {
-			output += fmt.Sprintf("[%s]●[white]", color)
-		} else if i == 0 {
-			output += "[aqua]|[white]"
-		} else {
-			output += "[gray]-[white]"
+		label := fmt.Sprintf("%s %s $%s", o.Ticker, typeSymbol, o.Strike.StringFixed(0))
+		if len(label) > labelWidth-2 {
+			label = label[:labelWidth-2]
 		}
-	}
-	output += "\n"
+		output += fmt.Sprintf(" [%s]%-*s[white]", color, labelWidth, label)
 
-	// Option labels below
-	output += " "
-	for _, m := range markers {
-		output += fmt.Sprintf("[%s]%s(%dd)[white]  ", m.color, m.label, m.daysLeft)
+		// Find which month column this expiry falls into
+		for i := 0; i < numMonths; i++ {
+			monthStart := currentMonth.AddDate(0, i, 0)
+			monthEnd := currentMonth.AddDate(0, i+1, 0)
+
+			cellContent := strings.Repeat(" ", monthWidth)
+
+			if (o.ExpiryDate.Equal(monthStart) || o.ExpiryDate.After(monthStart)) && o.ExpiryDate.Before(monthEnd) {
+				// This option expires in this month
+				// Position within month (0-1 scale)
+				daysInMonth := int(monthEnd.Sub(monthStart).Hours() / 24)
+				dayOfMonth := int(o.ExpiryDate.Sub(monthStart).Hours() / 24)
+				pos := (dayOfMonth * (monthWidth - 2)) / daysInMonth
+
+				// Build cell with marker
+				marker := fmt.Sprintf("[%s]●%02d[white]", color, o.ExpiryDate.Day())
+				padding := strings.Repeat(" ", pos)
+				remaining := monthWidth - pos - 3
+				if remaining < 0 {
+					remaining = 0
+				}
+				cellContent = padding + marker + strings.Repeat(" ", remaining)
+			}
+			output += cellContent
+		}
+		output += fmt.Sprintf("[%s]%dd[white]\n", color, daysLeft)
 	}
 
 	a.expiryTimeline.SetText(output)
