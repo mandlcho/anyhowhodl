@@ -546,19 +546,41 @@ func (a *App) updateTable() {
 				SetAlign(tview.AlignLeft).
 				SetExpansion(1))
 
-			// SIGNAL - based on target price vs current price
+			// SIGNAL - take-profit signals (priority order)
 			signalText := " - "
 			signalColor := tcell.ColorWhite
-			if h.TargetPrice.Valid {
-				target := h.TargetPrice.Decimal
-				if price.LessThan(target) {
-					signalText = " BUY "
-					signalColor = tcell.ColorLime
-				} else {
-					signalText = " SELL "
-					signalColor = tcell.ColorRed
-				}
+
+			// Check signals in priority order (most urgent first)
+			if h.TargetPrice.Valid && price.GreaterThanOrEqual(h.TargetPrice.Decimal) {
+				// Target price hit - highest priority sell signal
+				signalText = " TARGET "
+				signalColor = tcell.ColorRed
+			} else if plPct.GreaterThanOrEqual(decimal.NewFromInt(200)) {
+				signalText = " +200% "
+				signalColor = tcell.ColorRed
+			} else if plPct.GreaterThanOrEqual(decimal.NewFromInt(100)) {
+				signalText = " +100% "
+				signalColor = tcell.ColorRed
+			} else if plPct.GreaterThanOrEqual(decimal.NewFromInt(50)) {
+				signalText = " +50% "
+				signalColor = tcell.ColorOrange
+			} else if plPct.GreaterThanOrEqual(decimal.NewFromInt(25)) {
+				signalText = " +25% "
+				signalColor = tcell.ColorYellow
+			} else if weight.GreaterThan(decimal.NewFromInt(25)) {
+				// Position too large - rebalance signal
+				signalText = " REBAL "
+				signalColor = tcell.ColorOrange
+			} else if pctFromHigh >= -5 && pctFromHigh < 0 {
+				// Within 5% of 52-week high
+				signalText = " PEAK "
+				signalColor = tcell.ColorTeal
+			} else if h.TargetPrice.Valid && price.LessThan(h.TargetPrice.Decimal) {
+				// Below target - buy signal
+				signalText = " BUY "
+				signalColor = tcell.ColorLime
 			}
+
 			a.table.SetCell(row, 9, tview.NewTableCell(signalText).
 				SetTextColor(signalColor).
 				SetBackgroundColor(rowBg).
