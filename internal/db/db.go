@@ -397,16 +397,17 @@ func (d *DB) AssignOption(ctx context.Context, id string) error {
 }
 
 type PremiumSummary struct {
-	CallPremiums  decimal.Decimal
-	PutPremiums   decimal.Decimal
-	TotalPremiums decimal.Decimal
-	TotalFees     decimal.Decimal
-	CloseCosts    decimal.Decimal // Premium paid to close positions early
-	NetPL         decimal.Decimal // Premiums - Fees - Close costs
+	CallPremiums    decimal.Decimal
+	PutPremiums     decimal.Decimal
+	TotalPremiums   decimal.Decimal
+	TotalFees       decimal.Decimal
+	CloseCosts      decimal.Decimal // Premium paid to close positions early
+	NetPL           decimal.Decimal // Premiums - Fees - Close costs
+	CapitalAtRisk   decimal.Decimal // Total notional (strike × 100 × qty) for RoR calc
 }
 
 func (d *DB) GetPremiumsByYear(ctx context.Context, year int) (*PremiumSummary, error) {
-	var callPremiums, putPremiums, totalFees, closeCosts decimal.Decimal
+	var callPremiums, putPremiums, totalFees, closeCosts, capitalAtRisk decimal.Decimal
 
 	// Get CALL premiums sold
 	err := d.pool.QueryRow(ctx,
@@ -444,15 +445,25 @@ func (d *DB) GetPremiumsByYear(ctx context.Context, year int) (*PremiumSummary, 
 		return nil, err
 	}
 
+	// Get total capital at risk (strike × 100 × quantity) for all SELL options
+	err = d.pool.QueryRow(ctx,
+		`SELECT COALESCE(SUM(strike * quantity * 100), 0) FROM options
+		 WHERE action = 'SELL'
+		 AND EXTRACT(YEAR FROM created_at) = $1`, year).Scan(&capitalAtRisk)
+	if err != nil {
+		return nil, err
+	}
+
 	totalPremiums := callPremiums.Add(putPremiums)
 	netPL := totalPremiums.Sub(totalFees).Sub(closeCosts)
 
 	return &PremiumSummary{
-		CallPremiums:  callPremiums,
-		PutPremiums:   putPremiums,
-		TotalPremiums: totalPremiums,
-		TotalFees:     totalFees,
-		CloseCosts:    closeCosts,
-		NetPL:         netPL,
+		CallPremiums:    callPremiums,
+		PutPremiums:     putPremiums,
+		TotalPremiums:   totalPremiums,
+		TotalFees:       totalFees,
+		CloseCosts:      closeCosts,
+		NetPL:           netPL,
+		CapitalAtRisk:   capitalAtRisk,
 	}, nil
 }

@@ -36,7 +36,6 @@ type App struct {
 	options         []db.Option
 	quotes          map[string]yahoo.Quote
 	cash            decimal.Decimal
-	totalCost       decimal.Decimal // Total cost basis for return calculations
 	premiums        *db.PremiumSummary
 	focusIndex      int       // 0 = holdings table, 1 = options table
 	lastEscTime     time.Time // For double-ESC to quit
@@ -411,9 +410,6 @@ func (a *App) updateTable() {
 			totalValue = totalValue.Add(costBasis)
 		}
 	}
-
-	// Store totalCost for premium return calculations
-	a.totalCost = totalCost
 
 	// Second pass: populate table with weight %
 	for i, h := range a.holdings {
@@ -1009,9 +1005,9 @@ func (a *App) updateTimeline() {
 	}
 	premiumText += fmt.Sprintf("  Net: [%s]$%s[white]", netColor, formatNumber(a.premiums.NetPL.StringFixed(2)))
 
-	// Calculate return % and annualized % if we have cost basis
-	if !a.totalCost.IsZero() {
-		returnPct := a.premiums.NetPL.Div(a.totalCost).Mul(decimal.NewFromInt(100))
+	// Calculate return % and annualized % based on capital at risk
+	if !a.premiums.CapitalAtRisk.IsZero() {
+		returnPct := a.premiums.NetPL.Div(a.premiums.CapitalAtRisk).Mul(decimal.NewFromInt(100))
 
 		// Days elapsed in current year
 		now := time.Now()
