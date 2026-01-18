@@ -140,12 +140,12 @@ func (a *App) run() {
 		AddItem(a.optionsTable, 0, 1, false).
 		AddItem(a.expiryTimeline, 0, 1, false)
 
-	// Main layout - equal space for holdings and options
+	// Main layout - more space for options (1:2 ratio)
 	mainFlex := tview.NewFlex().
 		SetDirection(tview.FlexRow).
 		AddItem(a.createHeader(), 8, 0, false).
 		AddItem(holdingsSection, 0, 1, true).
-		AddItem(optionsSection, 0, 1, false).
+		AddItem(optionsSection, 0, 2, false).
 		AddItem(a.statusBar, 1, 0, false)
 
 	a.pages = tview.NewPages().
