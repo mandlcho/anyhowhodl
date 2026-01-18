@@ -1124,8 +1124,12 @@ func (a *App) updateExpiryTimeline() {
 			fridayDate := today.AddDate(0, 0, daysToFriday+(i*7))
 			periodLabel = fridayDate.Format("Jan 02")
 		} else {
-			m := time.Date(today.Year(), today.Month(), 1, 0, 0, 0, 0, time.Local).AddDate(0, i, 0)
-			periodLabel = m.Format("Jan 06")
+			// Calculate the third Friday of each month (standard options expiry)
+			firstOfMonth := time.Date(today.Year(), today.Month(), 1, 0, 0, 0, 0, time.Local).AddDate(0, i, 0)
+			// Days until first Friday: (Friday=5 - weekday + 7) % 7
+			daysUntilFriday := (5 - int(firstOfMonth.Weekday()) + 7) % 7
+			thirdFriday := firstOfMonth.AddDate(0, 0, daysUntilFriday+14)
+			periodLabel = thirdFriday.Format("Jan 02")
 		}
 		output += fmt.Sprintf("[aqua]%-*s[white]", periodWidth, periodLabel)
 	}
