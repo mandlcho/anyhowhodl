@@ -35,6 +35,7 @@ type App struct {
 	premiums       *db.PremiumSummary
 	focusIndex     int       // 0 = holdings table, 1 = options table
 	lastEscTime    time.Time // For double-ESC to quit
+	weeklyView     bool      // Toggle between weekly and monthly timeline view
 }
 
 func main() {
@@ -120,7 +121,7 @@ func (a *App) run() {
 	// Status bar
 	a.statusBar = tview.NewTextView().
 		SetDynamicColors(true).
-		SetText(" [yellow]a[white]:Add Holding  [yellow]o[white]:Add Option  [yellow]c[white]:Cash  [yellow]Tab[white]:Switch  [yellow]d[white]:Delete  [yellow]r[white]:Refresh  [yellow]q[white]:Quit")
+		SetText(" [yellow]a[white]:Add Holding  [yellow]o[white]:Add Option  [yellow]c[white]:Cash  [yellow]Tab[white]:Switch  [yellow]d[white]:Delete  [yellow]r[white]:Refresh  [yellow]w[white]:Week/Month  [yellow]q[white]:Quit")
 
 	// Summary bar (portfolio totals)
 	a.summary = tview.NewTextView().SetDynamicColors(true)
@@ -215,6 +216,10 @@ func (a *App) run() {
 			return nil
 		case 'r':
 			a.refreshData()
+			return nil
+		case 'w':
+			a.weeklyView = !a.weeklyView
+			a.updateTimeline()
 			return nil
 		}
 		return event
@@ -954,6 +959,13 @@ func (a *App) updateExpiryTimeline() {
 		}
 	}
 
+	// Update title based on view mode
+	viewMode := "Monthly"
+	if a.weeklyView {
+		viewMode = "Weekly"
+	}
+	a.expiryTimeline.SetTitle(fmt.Sprintf(" Expiry Timeline [%s] ", viewMode))
+
 	if len(activeOptions) == 0 {
 		a.expiryTimeline.SetText(" [gray]No active options")
 		return
@@ -968,45 +980,48 @@ func (a *App) updateExpiryTimeline() {
 		}
 	}
 
-	// Build monthly timeline (show 6 months)
-	numMonths := 6
-	monthWidth := 12 // characters per month column
+	// Timeline parameters based on view mode
+	var numPeriods int
+	var periodWidth int
+	var totalWidth int
 
-	// Generate month headers starting from current month
-	currentMonth := time.Date(today.Year(), today.Month(), 1, 0, 0, 0, 0, time.Local)
-
-	// Calculate today's position in the first month
-	todayDayOfMonth := today.Day()
-	daysInCurrentMonth := time.Date(today.Year(), today.Month()+1, 0, 0, 0, 0, 0, time.Local).Day()
-	todayPos := (todayDayOfMonth * (monthWidth - 1)) / daysInCurrentMonth
+	if a.weeklyView {
+		numPeriods = 12 // 12 weeks
+		totalWidth = 120
+		periodWidth = totalWidth / numPeriods
+	} else {
+		numPeriods = 6 // 6 months
+		totalWidth = 120
+		periodWidth = totalWidth / numPeriods
+	}
 
 	var output string
 
 	// "Today" marker row
-	output = " "
-	output += strings.Repeat(" ", todayPos)
-	output += "[aqua]▼Today[white]\n"
+	output = " [aqua]▼Today[white]\n"
 
-	// Header row with months
+	// Header row with periods
 	output += " "
-	for i := 0; i < numMonths; i++ {
-		m := currentMonth.AddDate(0, i, 0)
-		monthLabel := m.Format("Jan 06")
-		output += fmt.Sprintf("[aqua]%-*s[white]", monthWidth, monthLabel)
+	for i := 0; i < numPeriods; i++ {
+		var periodLabel string
+		if a.weeklyView {
+			weekStart := today.AddDate(0, 0, i*7)
+			periodLabel = weekStart.Format("Jan 02")
+		} else {
+			m := time.Date(today.Year(), today.Month(), 1, 0, 0, 0, 0, time.Local).AddDate(0, i, 0)
+			periodLabel = m.Format("Jan 06")
+		}
+		output += fmt.Sprintf("[aqua]%-*s[white]", periodWidth, periodLabel)
 	}
 	output += "\n"
 
 	// Separator line with today marker
-	output += " "
-	for i := 0; i < numMonths; i++ {
-		for j := 0; j < monthWidth; j++ {
-			if i == 0 && j == todayPos {
-				output += "[aqua]│[white]"
-			} else if j == 0 && i > 0 {
-				output += "+"
-			} else {
-				output += "-"
-			}
+	output += " [aqua]│[white]"
+	for i := 1; i < totalWidth; i++ {
+		if i%periodWidth == 0 {
+			output += "+"
+		} else {
+			output += "-"
 		}
 	}
 	output += "\n"
@@ -1014,6 +1029,9 @@ func (a *App) updateExpiryTimeline() {
 	// Each contract gets its own row
 	for _, o := range activeOptions {
 		daysLeft := int(o.ExpiryDate.Sub(today).Hours() / 24)
+		if daysLeft < 0 {
+			daysLeft = 0
+		}
 
 		// Color based on days left
 		color := "white"
@@ -1027,49 +1045,60 @@ func (a *App) updateExpiryTimeline() {
 			color = "lime"
 		}
 
-		// Contract label with type
+		// Contract label
 		typeSymbol := "C"
 		if o.OptionType == "PUT" {
 			typeSymbol = "P"
 		}
 		contractLabel := fmt.Sprintf("%s %s $%s(%dd)", o.Ticker, typeSymbol, o.Strike.StringFixed(0), daysLeft)
 
-		output += " "
+		// Calculate expiry position
+		var expiryPos int
+		if a.weeklyView {
+			// Position based on days (12 weeks = 84 days)
+			maxDays := numPeriods * 7
+			if daysLeft > maxDays {
+				expiryPos = totalWidth - 1
+			} else {
+				expiryPos = (daysLeft * totalWidth) / maxDays
+			}
+		} else {
+			// Position based on months
+			monthsAway := (o.ExpiryDate.Year()-today.Year())*12 + int(o.ExpiryDate.Month()-today.Month())
+			dayInMonth := o.ExpiryDate.Day()
+			daysInMonth := time.Date(o.ExpiryDate.Year(), o.ExpiryDate.Month()+1, 0, 0, 0, 0, 0, time.Local).Day()
 
-		// Build the row with today line and expiry marker
-		for i := 0; i < numMonths; i++ {
-			monthStart := currentMonth.AddDate(0, i, 0)
-			monthEnd := currentMonth.AddDate(0, i+1, 0)
-			daysInMonth := int(monthEnd.Sub(monthStart).Hours() / 24)
-
-			for j := 0; j < monthWidth; j++ {
-				// Check if this is the today marker position (only in first month)
-				if i == 0 && j == todayPos {
-					output += "[aqua]│[white]"
-					continue
-				}
-
-				// Check if this option expires at this position
-				if (o.ExpiryDate.Equal(monthStart) || o.ExpiryDate.After(monthStart)) && o.ExpiryDate.Before(monthEnd) {
-					dayOfMonth := o.ExpiryDate.Day()
-					expiryPos := ((dayOfMonth - 1) * (monthWidth - 1)) / daysInMonth
-
-					if j == expiryPos {
-						output += fmt.Sprintf("[%s]●%s[white]", color, contractLabel)
-						// Skip ahead past the label
-						j += len(contractLabel)
-						// Fill remaining space
-						remaining := monthWidth - j - 1
-						if remaining > 0 {
-							output += strings.Repeat(" ", remaining)
-						}
-						break
-					}
-				}
-				output += " "
+			if monthsAway >= numPeriods {
+				expiryPos = totalWidth - 1
+			} else {
+				expiryPos = (monthsAway * periodWidth) + ((dayInMonth * periodWidth) / daysInMonth)
 			}
 		}
+
+		if expiryPos < 1 {
+			expiryPos = 1
+		}
+		if expiryPos >= totalWidth {
+			expiryPos = totalWidth - 1
+		}
+
+		// Build the row: today line, connecting line, marker with label
+		output += " [aqua]├[white]"
+
+		// Draw connecting line from today to expiry marker
+		for i := 1; i < expiryPos; i++ {
+			output += fmt.Sprintf("[%s]─[white]", color)
+		}
+
+		// Draw marker and label
+		output += fmt.Sprintf("[%s]●%s[white]", color, contractLabel)
+
 		output += "\n"
+	}
+
+	// Bottom of today line
+	if len(activeOptions) > 0 {
+		output += " [aqua]│[white]\n"
 	}
 
 	a.expiryTimeline.SetText(output)
