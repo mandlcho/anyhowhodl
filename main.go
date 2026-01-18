@@ -122,23 +122,29 @@ func (a *App) run() {
 		SetDynamicColors(true).
 		SetText(" [yellow]a[white]:Add Holding  [yellow]o[white]:Add Option  [yellow]c[white]:Cash  [yellow]Tab[white]:Switch  [yellow]d[white]:Delete  [yellow]r[white]:Refresh  [yellow]q[white]:Quit")
 
-	// Summary bar
+	// Summary bar (portfolio totals)
 	a.summary = tview.NewTextView().SetDynamicColors(true)
+	a.summary.SetBorder(true).SetTitle(" Portfolio ").SetTitleAlign(tview.AlignLeft).SetBorderColor(tcell.ColorTeal)
 
-	// Options section (table + stats + timeline)
+	// Holdings section (summary on top, then table)
+	holdingsSection := tview.NewFlex().
+		SetDirection(tview.FlexRow).
+		AddItem(a.summary, 3, 0, false).
+		AddItem(a.table, 0, 1, true)
+
+	// Options section (stats on top, then table, then timeline)
 	optionsSection := tview.NewFlex().
 		SetDirection(tview.FlexRow).
-		AddItem(a.optionsTable, 0, 1, false).
 		AddItem(a.timeline, 3, 0, false).
+		AddItem(a.optionsTable, 0, 1, false).
 		AddItem(a.expiryTimeline, 0, 1, false)
 
-	// Main layout - holdings gets 3:2 space vs options
+	// Main layout
 	mainFlex := tview.NewFlex().
 		SetDirection(tview.FlexRow).
 		AddItem(a.createHeader(), 8, 0, false).
-		AddItem(a.table, 0, 3, true).
+		AddItem(holdingsSection, 0, 3, true).
 		AddItem(optionsSection, 0, 2, false).
-		AddItem(a.summary, 2, 0, false).
 		AddItem(a.statusBar, 1, 0, false)
 
 	a.pages = tview.NewPages().
@@ -964,16 +970,25 @@ func (a *App) updateExpiryTimeline() {
 
 	// Build monthly timeline (show 6 months)
 	numMonths := 6
-	monthWidth := 10 // characters per month column
-	labelWidth := 18 // width for contract labels
+	monthWidth := 12 // characters per month column
 
 	// Generate month headers starting from current month
 	currentMonth := time.Date(today.Year(), today.Month(), 1, 0, 0, 0, 0, time.Local)
 
+	// Calculate today's position in the first month
+	todayDayOfMonth := today.Day()
+	daysInCurrentMonth := time.Date(today.Year(), today.Month()+1, 0, 0, 0, 0, 0, time.Local).Day()
+	todayPos := (todayDayOfMonth * (monthWidth - 1)) / daysInCurrentMonth
+
 	var output string
 
+	// "Today" marker row
+	output = " "
+	output += strings.Repeat(" ", todayPos)
+	output += "[aqua]▼Today[white]\n"
+
 	// Header row with months
-	output = fmt.Sprintf(" [teal]%-*s[white]", labelWidth, "CONTRACT")
+	output += " "
 	for i := 0; i < numMonths; i++ {
 		m := currentMonth.AddDate(0, i, 0)
 		monthLabel := m.Format("Jan 06")
@@ -981,10 +996,18 @@ func (a *App) updateExpiryTimeline() {
 	}
 	output += "\n"
 
-	// Separator line
-	output += " " + strings.Repeat("-", labelWidth-1)
+	// Separator line with today marker
+	output += " "
 	for i := 0; i < numMonths; i++ {
-		output += "+" + strings.Repeat("-", monthWidth-1)
+		for j := 0; j < monthWidth; j++ {
+			if i == 0 && j == todayPos {
+				output += "[aqua]│[white]"
+			} else if j == 0 && i > 0 {
+				output += "+"
+			} else {
+				output += "-"
+			}
+		}
 	}
 	output += "\n"
 
@@ -1004,43 +1027,49 @@ func (a *App) updateExpiryTimeline() {
 			color = "lime"
 		}
 
-		// Contract label
+		// Contract label with type
 		typeSymbol := "C"
 		if o.OptionType == "PUT" {
 			typeSymbol = "P"
 		}
-		label := fmt.Sprintf("%s %s $%s", o.Ticker, typeSymbol, o.Strike.StringFixed(0))
-		if len(label) > labelWidth-2 {
-			label = label[:labelWidth-2]
-		}
-		output += fmt.Sprintf(" [%s]%-*s[white]", color, labelWidth, label)
+		contractLabel := fmt.Sprintf("%s %s $%s(%dd)", o.Ticker, typeSymbol, o.Strike.StringFixed(0), daysLeft)
 
-		// Find which month column this expiry falls into
+		output += " "
+
+		// Build the row with today line and expiry marker
 		for i := 0; i < numMonths; i++ {
 			monthStart := currentMonth.AddDate(0, i, 0)
 			monthEnd := currentMonth.AddDate(0, i+1, 0)
+			daysInMonth := int(monthEnd.Sub(monthStart).Hours() / 24)
 
-			cellContent := strings.Repeat(" ", monthWidth)
-
-			if (o.ExpiryDate.Equal(monthStart) || o.ExpiryDate.After(monthStart)) && o.ExpiryDate.Before(monthEnd) {
-				// This option expires in this month
-				// Position within month (0-1 scale)
-				daysInMonth := int(monthEnd.Sub(monthStart).Hours() / 24)
-				dayOfMonth := int(o.ExpiryDate.Sub(monthStart).Hours() / 24)
-				pos := (dayOfMonth * (monthWidth - 2)) / daysInMonth
-
-				// Build cell with marker
-				marker := fmt.Sprintf("[%s]●%02d[white]", color, o.ExpiryDate.Day())
-				padding := strings.Repeat(" ", pos)
-				remaining := monthWidth - pos - 3
-				if remaining < 0 {
-					remaining = 0
+			for j := 0; j < monthWidth; j++ {
+				// Check if this is the today marker position (only in first month)
+				if i == 0 && j == todayPos {
+					output += "[aqua]│[white]"
+					continue
 				}
-				cellContent = padding + marker + strings.Repeat(" ", remaining)
+
+				// Check if this option expires at this position
+				if (o.ExpiryDate.Equal(monthStart) || o.ExpiryDate.After(monthStart)) && o.ExpiryDate.Before(monthEnd) {
+					dayOfMonth := o.ExpiryDate.Day()
+					expiryPos := ((dayOfMonth - 1) * (monthWidth - 1)) / daysInMonth
+
+					if j == expiryPos {
+						output += fmt.Sprintf("[%s]●%s[white]", color, contractLabel)
+						// Skip ahead past the label
+						j += len(contractLabel)
+						// Fill remaining space
+						remaining := monthWidth - j - 1
+						if remaining > 0 {
+							output += strings.Repeat(" ", remaining)
+						}
+						break
+					}
+				}
+				output += " "
 			}
-			output += cellContent
 		}
-		output += fmt.Sprintf("[%s]%dd[white]\n", color, daysLeft)
+		output += "\n"
 	}
 
 	a.expiryTimeline.SetText(output)
