@@ -32,7 +32,8 @@ type App struct {
 	quotes       map[string]yahoo.Quote
 	cash         decimal.Decimal
 	premiums     *db.PremiumSummary
-	focusIndex   int // 0 = holdings table, 1 = options table
+	focusIndex   int       // 0 = holdings table, 1 = options table
+	lastEscTime  time.Time // For double-ESC to quit
 }
 
 func main() {
@@ -65,6 +66,15 @@ func main() {
 
 func (a *App) run() {
 	a.app = tview.NewApplication()
+
+	// Set global button styles for better visibility
+	tview.Styles.PrimitiveBackgroundColor = tcell.ColorBlack
+	tview.Styles.ContrastBackgroundColor = tcell.ColorDarkSlateGray
+	tview.Styles.MoreContrastBackgroundColor = tcell.ColorGreen
+	tview.Styles.BorderColor = tcell.ColorWhite
+	tview.Styles.TitleColor = tcell.ColorWhite
+	tview.Styles.PrimaryTextColor = tcell.ColorWhite
+	tview.Styles.SecondaryTextColor = tcell.ColorYellow
 
 	// Create holdings table
 	a.table = tview.NewTable().
@@ -126,10 +136,28 @@ func (a *App) run() {
 	a.pages = tview.NewPages().
 		AddPage("main", mainFlex, true, true)
 
-	// Key bindings - only active on main page
+	// Key bindings
 	a.app.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-		// Only handle shortcuts when on main page
 		name, _ := a.pages.GetFrontPage()
+
+		// ESC handling
+		if event.Key() == tcell.KeyEscape {
+			if name != "main" {
+				// Close current dialog
+				a.pages.RemovePage(name)
+				return nil
+			}
+			// Double-ESC to quit (within 500ms)
+			now := time.Now()
+			if now.Sub(a.lastEscTime) < 500*time.Millisecond {
+				a.app.Stop()
+				return nil
+			}
+			a.lastEscTime = now
+			return nil
+		}
+
+		// Only handle other shortcuts when on main page
 		if name != "main" {
 			return event
 		}
@@ -497,15 +525,7 @@ func (a *App) showAddForm() {
 		AddInputField("Entry Date (YYYY-MM-DD)", time.Now().Format("2006-01-02"), 15, nil, nil).
 		AddInputField("Notes", "", 30, nil, nil)
 
-	// Style the form
-	form.SetBackgroundColor(tcell.ColorBlack)
-	form.SetFieldBackgroundColor(tcell.ColorDarkSlateGray)
-	form.SetFieldTextColor(tcell.ColorWhite)
-	form.SetLabelColor(tcell.ColorTeal)
-	form.SetButtonBackgroundColor(tcell.ColorTeal)
-	form.SetButtonTextColor(tcell.ColorBlack)
-	form.SetBorderColor(tcell.ColorTeal)
-	form.SetTitleColor(tcell.ColorTeal)
+	styleForm(form)
 
 	form.AddButton("Save", func() {
 		ticker := strings.ToUpper(form.GetFormItem(0).(*tview.InputField).GetText())
@@ -605,15 +625,7 @@ func (a *App) showEditForm(index int) {
 		AddInputField("Target Price ($)", targetStr, 15, nil, nil).
 		AddInputField("Notes", h.Notes, 30, nil, nil)
 
-	// Style the form
-	form.SetBackgroundColor(tcell.ColorBlack)
-	form.SetFieldBackgroundColor(tcell.ColorDarkSlateGray)
-	form.SetFieldTextColor(tcell.ColorWhite)
-	form.SetLabelColor(tcell.ColorTeal)
-	form.SetButtonBackgroundColor(tcell.ColorTeal)
-	form.SetButtonTextColor(tcell.ColorBlack)
-	form.SetBorderColor(tcell.ColorTeal)
-	form.SetTitleColor(tcell.ColorTeal)
+	styleForm(form)
 
 	form.AddButton("Save", func() {
 		qtyStr := form.GetFormItem(0).(*tview.InputField).GetText()
@@ -714,15 +726,7 @@ func (a *App) showCashForm() {
 		}
 	})
 
-	// Style the form
-	form.SetBackgroundColor(tcell.ColorBlack)
-	form.SetFieldBackgroundColor(tcell.ColorDarkSlateGray)
-	form.SetFieldTextColor(tcell.ColorWhite)
-	form.SetLabelColor(tcell.ColorTeal)
-	form.SetButtonBackgroundColor(tcell.ColorTeal)
-	form.SetButtonTextColor(tcell.ColorBlack)
-	form.SetBorderColor(tcell.ColorTeal)
-	form.SetTitleColor(tcell.ColorTeal)
+	styleForm(form)
 
 	form.AddButton("Save", saveCash)
 
@@ -953,15 +957,7 @@ func (a *App) showAddOptionForm() {
 		AddInputField("Fee ($)", "0", 10, nil, nil).
 		AddInputField("Notes", "", 30, nil, nil)
 
-	// Style the form
-	form.SetBackgroundColor(tcell.ColorBlack)
-	form.SetFieldBackgroundColor(tcell.ColorDarkSlateGray)
-	form.SetFieldTextColor(tcell.ColorWhite)
-	form.SetLabelColor(tcell.ColorTeal)
-	form.SetButtonBackgroundColor(tcell.ColorTeal)
-	form.SetButtonTextColor(tcell.ColorBlack)
-	form.SetBorderColor(tcell.ColorTeal)
-	form.SetTitleColor(tcell.ColorTeal)
+	styleForm(form)
 
 	form.AddButton("Save", func() {
 		ticker := strings.ToUpper(form.GetFormItem(0).(*tview.InputField).GetText())
@@ -1155,15 +1151,7 @@ func (a *App) showCloseOptionForm(index int) {
 		AddInputField("Close Premium ($)", "", 15, nil, nil).
 		AddInputField("Close Fee ($)", "0", 10, nil, nil)
 
-	// Style the form
-	form.SetBackgroundColor(tcell.ColorBlack)
-	form.SetFieldBackgroundColor(tcell.ColorDarkSlateGray)
-	form.SetFieldTextColor(tcell.ColorWhite)
-	form.SetLabelColor(tcell.ColorTeal)
-	form.SetButtonBackgroundColor(tcell.ColorTeal)
-	form.SetButtonTextColor(tcell.ColorBlack)
-	form.SetBorderColor(tcell.ColorTeal)
-	form.SetTitleColor(tcell.ColorTeal)
+	styleForm(form)
 
 	form.AddButton("Close Position", func() {
 		closePremiumStr := form.GetFormItem(0).(*tview.InputField).GetText()
@@ -1279,6 +1267,22 @@ func (a *App) createModalPage(name string, content tview.Primitive, width, heigh
 		AddItem(rightBox, 0, 1, false)
 
 	a.pages.AddPage(name, flex, true, true)
+}
+
+// styleForm applies consistent styling to forms with clear button activation
+func styleForm(form *tview.Form) {
+	form.SetBackgroundColor(tcell.ColorBlack)
+	form.SetFieldBackgroundColor(tcell.ColorDarkSlateGray)
+	form.SetFieldTextColor(tcell.ColorWhite)
+	form.SetLabelColor(tcell.ColorTeal)
+	form.SetButtonBackgroundColor(tcell.ColorDarkSlateGray)
+	form.SetButtonTextColor(tcell.ColorWhite)
+	form.SetButtonActivatedStyle(tcell.StyleDefault.
+		Background(tcell.ColorTeal).
+		Foreground(tcell.ColorBlack).
+		Bold(true))
+	form.SetBorderColor(tcell.ColorTeal)
+	form.SetTitleColor(tcell.ColorTeal)
 }
 
 func formatNumber(s string) string {
