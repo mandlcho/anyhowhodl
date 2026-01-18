@@ -325,10 +325,13 @@ func (a *App) refreshData() {
 
 func (a *App) updateLayout() {
 	// Calculate exact table height to show all holdings without scrolling
-	// Table needs: header (1) + data rows + top/bottom border (2)
-	tableHeight := len(a.holdings) + 3
-	if tableHeight < 4 {
-		tableHeight = 4 // Minimum: header + border
+	// Table with borders needs: top border (1) + header (1) + separator rows + data rows + bottom border (1)
+	// With SetBorders(true), each row has a separator, so: 1 + (rows+1)*2 - 1 = rows*2 + 2
+	// Simplified: header + all data rows with separators + borders
+	numRows := len(a.holdings)
+	tableHeight := (numRows * 2) + 4 // Each row takes 2 lines (content + separator) + header area
+	if tableHeight < 5 {
+		tableHeight = 5
 	}
 
 	// Holdings section height: summary (3) + table
@@ -337,7 +340,7 @@ func (a *App) updateLayout() {
 	a.holdingsSection.Clear()
 	a.holdingsSection.
 		AddItem(a.summary, 3, 0, false).
-		AddItem(a.table, tableHeight, 0, true)
+		AddItem(a.table, tableHeight, 0, false)
 
 	// Rebuild main flex with fixed holdings height, options takes rest
 	a.mainFlex.Clear()
