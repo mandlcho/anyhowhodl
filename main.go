@@ -354,10 +354,10 @@ func (a *App) updateLayout() {
 			numActiveOptions++
 		}
 	}
-	// Timeline needs: border (2) + header row (1) + one line per option
-	timelineHeight := numActiveOptions + 3
-	if timelineHeight < 4 {
-		timelineHeight = 4
+	// Timeline needs: border (2) + Today marker (1) + header row (1) + separator (1) + one line per option
+	timelineHeight := numActiveOptions + 5
+	if timelineHeight < 6 {
+		timelineHeight = 6
 	}
 
 	// Rebuild options section with fixed timeline height
