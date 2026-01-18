@@ -740,7 +740,7 @@ func (a *App) updateOptionsTable() {
 	a.optionsTable.Clear()
 
 	// Header row
-	headers := []string{"TICKER", "TYPE", "ACTION", "STRIKE", "EXPIRY", "QTY", "PREMIUM", "FEE", "DAYS"}
+	headers := []string{"TICKER", "TYPE", "ACTION", "STRIKE", "EXPIRY", "QTY", "PREMIUM", "FEE", "STATUS"}
 	for i, h := range headers {
 		cell := tview.NewTableCell(" "+h+" ").
 			SetTextColor(tcell.ColorBlack).
@@ -825,18 +825,35 @@ func (a *App) updateOptionsTable() {
 			SetAlign(tview.AlignLeft).
 			SetExpansion(1))
 
-		// Days left
-		daysLeft := int(o.ExpiryDate.Sub(today).Hours() / 24)
-		daysColor := tcell.ColorWhite
-		if daysLeft <= 7 {
-			daysColor = tcell.ColorRed
-		} else if daysLeft <= 14 {
-			daysColor = tcell.ColorYellow
-		} else if daysLeft <= 30 {
-			daysColor = tcell.ColorOrange
+		// Status with color coding
+		statusColor := tcell.ColorLime
+		statusText := o.Status
+		if o.Status == "EXPIRED" {
+			statusColor = tcell.ColorGray
+		} else if o.Status == "ASSIGNED" {
+			statusColor = tcell.ColorYellow
+		} else if o.Status == "CLOSED" {
+			statusColor = tcell.ColorAqua
 		}
-		a.optionsTable.SetCell(row, 8, tview.NewTableCell(" "+fmt.Sprintf("%d", daysLeft)+" ").
-			SetTextColor(daysColor).
+		// Add days left for ACTIVE options
+		if o.Status == "ACTIVE" {
+			daysLeft := int(o.ExpiryDate.Sub(today).Hours() / 24)
+			if daysLeft < 0 {
+				statusText = "EXPD"
+				statusColor = tcell.ColorRed
+			} else {
+				statusText = fmt.Sprintf("%dd", daysLeft)
+				if daysLeft <= 7 {
+					statusColor = tcell.ColorRed
+				} else if daysLeft <= 14 {
+					statusColor = tcell.ColorYellow
+				} else if daysLeft <= 30 {
+					statusColor = tcell.ColorOrange
+				}
+			}
+		}
+		a.optionsTable.SetCell(row, 8, tview.NewTableCell(" "+statusText+" ").
+			SetTextColor(statusColor).
 			SetBackgroundColor(rowBg).
 			SetAlign(tview.AlignLeft).
 			SetExpansion(1))

@@ -185,8 +185,9 @@ func (d *DB) GetActiveOptions(ctx context.Context) ([]Option, error) {
 	rows, err := d.pool.Query(ctx,
 		`SELECT id, ticker, option_type, action, strike, expiry_date, quantity, premium, open_fee, close_premium, close_fee, status, notes, created_at, updated_at
 		 FROM options
-		 WHERE status = 'ACTIVE' AND expiry_date >= CURRENT_DATE
-		 ORDER BY expiry_date, ticker`)
+		 ORDER BY
+		   CASE status WHEN 'ACTIVE' THEN 0 ELSE 1 END,
+		   expiry_date, ticker`)
 	if err != nil {
 		return nil, err
 	}
