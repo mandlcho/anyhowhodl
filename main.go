@@ -761,9 +761,17 @@ func (a *App) updateOptionsTable() {
 		row := i + 1
 		rowBg := tcell.ColorBlack
 
+		// Dim colors for non-active options
+		isActive := o.Status == "ACTIVE"
+		dimColor := tcell.ColorDimGray
+
 		// Ticker
+		tickerColor := tcell.ColorFuchsia
+		if !isActive {
+			tickerColor = dimColor
+		}
 		a.optionsTable.SetCell(row, 0, tview.NewTableCell(" "+o.Ticker+" ").
-			SetTextColor(tcell.ColorFuchsia).
+			SetTextColor(tickerColor).
 			SetBackgroundColor(rowBg).
 			SetAlign(tview.AlignLeft).
 			SetExpansion(1))
@@ -772,6 +780,9 @@ func (a *App) updateOptionsTable() {
 		typeColor := tcell.ColorLime
 		if o.OptionType == "PUT" {
 			typeColor = tcell.ColorRed
+		}
+		if !isActive {
+			typeColor = dimColor
 		}
 		a.optionsTable.SetCell(row, 1, tview.NewTableCell(" "+o.OptionType+" ").
 			SetTextColor(typeColor).
@@ -784,6 +795,9 @@ func (a *App) updateOptionsTable() {
 		if o.Action == "SELL" {
 			actionColor = tcell.ColorAqua
 		}
+		if !isActive {
+			actionColor = dimColor
+		}
 		a.optionsTable.SetCell(row, 2, tview.NewTableCell(" "+o.Action+" ").
 			SetTextColor(actionColor).
 			SetBackgroundColor(rowBg).
@@ -791,29 +805,45 @@ func (a *App) updateOptionsTable() {
 			SetExpansion(1))
 
 		// Strike
+		strikeColor := tcell.ColorWhite
+		if !isActive {
+			strikeColor = dimColor
+		}
 		a.optionsTable.SetCell(row, 3, tview.NewTableCell(" $"+formatNumber(o.Strike.StringFixed(2))+" ").
-			SetTextColor(tcell.ColorWhite).
+			SetTextColor(strikeColor).
 			SetBackgroundColor(rowBg).
 			SetAlign(tview.AlignLeft).
 			SetExpansion(1))
 
 		// Expiry
+		expiryColor := tcell.ColorWhite
+		if !isActive {
+			expiryColor = dimColor
+		}
 		a.optionsTable.SetCell(row, 4, tview.NewTableCell(" "+o.ExpiryDate.Format("2006-01-02")+" ").
-			SetTextColor(tcell.ColorWhite).
+			SetTextColor(expiryColor).
 			SetBackgroundColor(rowBg).
 			SetAlign(tview.AlignLeft).
 			SetExpansion(1))
 
 		// Quantity
+		qtyColor := tcell.ColorWhite
+		if !isActive {
+			qtyColor = dimColor
+		}
 		a.optionsTable.SetCell(row, 5, tview.NewTableCell(" "+fmt.Sprintf("%d", o.Quantity)+" ").
-			SetTextColor(tcell.ColorWhite).
+			SetTextColor(qtyColor).
 			SetBackgroundColor(rowBg).
 			SetAlign(tview.AlignLeft).
 			SetExpansion(1))
 
 		// Premium
+		premiumColor := tcell.ColorYellow
+		if !isActive {
+			premiumColor = dimColor
+		}
 		a.optionsTable.SetCell(row, 6, tview.NewTableCell(" $"+formatNumber(o.Premium.StringFixed(2))+" ").
-			SetTextColor(tcell.ColorYellow).
+			SetTextColor(premiumColor).
 			SetBackgroundColor(rowBg).
 			SetAlign(tview.AlignLeft).
 			SetExpansion(1))
@@ -823,8 +853,12 @@ func (a *App) updateOptionsTable() {
 		if !o.OpenFee.IsZero() {
 			feeText = " $" + formatNumber(o.OpenFee.StringFixed(2)) + " "
 		}
+		feeColor := tcell.ColorOrange
+		if !isActive {
+			feeColor = dimColor
+		}
 		a.optionsTable.SetCell(row, 7, tview.NewTableCell(feeText).
-			SetTextColor(tcell.ColorOrange).
+			SetTextColor(feeColor).
 			SetBackgroundColor(rowBg).
 			SetAlign(tview.AlignLeft).
 			SetExpansion(1))
