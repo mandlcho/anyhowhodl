@@ -893,9 +893,14 @@ func (a *App) updateTimeline() {
 	today := time.Now().Truncate(24 * time.Hour)
 	var timelineText string
 
-	// Expiration timeline
+	// Expiration timeline - only show ACTIVE options
 	timelineText = "\n "
+	activeCount := 0
 	for _, o := range a.options {
+		if o.Status != "ACTIVE" {
+			continue
+		}
+		activeCount++
 		daysLeft := int(o.ExpiryDate.Sub(today).Hours() / 24)
 
 		// Color based on days left
@@ -915,6 +920,11 @@ func (a *App) updateTimeline() {
 
 		timelineText += fmt.Sprintf("[%s]%s %s$%s %s (%dd)[white]  ",
 			color, o.Ticker, typeSymbol, o.Strike.StringFixed(0), o.ExpiryDate.Format("01/02"), daysLeft)
+	}
+
+	if activeCount == 0 {
+		a.timeline.SetText(premiumText + "\n [gray]No active options")
+		return
 	}
 
 	a.timeline.SetText(premiumText + timelineText)
