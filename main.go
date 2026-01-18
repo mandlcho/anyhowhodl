@@ -62,9 +62,10 @@ func main() {
 	defer database.Close()
 
 	app := &App{
-		db:     database,
-		yahoo:  yahoo.NewClient(),
-		quotes: make(map[string]yahoo.Quote),
+		db:         database,
+		yahoo:      yahoo.NewClient(),
+		quotes:     make(map[string]yahoo.Quote),
+		weeklyView: true, // Default to weekly view
 	}
 
 	app.run()
