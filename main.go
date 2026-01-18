@@ -28,6 +28,7 @@ type App struct {
 	expiryTimeline  *tview.TextView // Visual expiry timeline
 	statusBar       *tview.TextView
 	summary         *tview.TextView
+	header          tview.Primitive
 	holdingsSection *tview.Flex
 	optionsSection  *tview.Flex
 	mainFlex        *tview.Flex
@@ -143,10 +144,13 @@ func (a *App) run() {
 		AddItem(a.optionsTable, 0, 2, false).
 		AddItem(a.expiryTimeline, 0, 1, false)
 
+	// Create header once and store it
+	a.header = a.createHeader()
+
 	// Main layout - holdings auto-sized, options takes remaining space
 	a.mainFlex = tview.NewFlex().
 		SetDirection(tview.FlexRow).
-		AddItem(a.createHeader(), 8, 0, false).
+		AddItem(a.header, 8, 0, false).
 		AddItem(a.holdingsSection, 0, 1, true).
 		AddItem(a.optionsSection, 0, 2, false).
 		AddItem(a.statusBar, 1, 0, false)
@@ -345,7 +349,7 @@ func (a *App) updateLayout() {
 	// Rebuild main flex with fixed holdings height, options takes rest
 	a.mainFlex.Clear()
 	a.mainFlex.
-		AddItem(a.createHeader(), 8, 0, false).
+		AddItem(a.header, 8, 0, false).
 		AddItem(a.holdingsSection, holdingsHeight, 0, false).
 		AddItem(a.optionsSection, 0, 1, false).
 		AddItem(a.statusBar, 1, 0, false)
