@@ -140,7 +140,7 @@ func (a *App) run() {
 	a.optionsSection = tview.NewFlex().
 		SetDirection(tview.FlexRow).
 		AddItem(a.timeline, 3, 0, false).
-		AddItem(a.optionsTable, 0, 1, false).
+		AddItem(a.optionsTable, 0, 2, false).
 		AddItem(a.expiryTimeline, 0, 1, false)
 
 	// Main layout - holdings auto-sized, options takes remaining space
