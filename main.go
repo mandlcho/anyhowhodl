@@ -863,12 +863,27 @@ func (a *App) updateOptionsTable() {
 func (a *App) updateTimeline() {
 	currentYear := time.Now().Year()
 
-	// Premium summary line
-	premiumText := fmt.Sprintf(" [teal]%d Premiums:[white] Calls: [lime]$%s[white]  Puts: [lime]$%s[white]  Total: [yellow]$%s[white]",
+	// Premium summary line with fees and net P&L
+	premiumText := fmt.Sprintf(" [teal]%d Premiums:[white] Calls: [lime]$%s[white]  Puts: [lime]$%s[white]  Gross: [yellow]$%s[white]",
 		currentYear,
 		formatNumber(a.premiums.CallPremiums.StringFixed(2)),
 		formatNumber(a.premiums.PutPremiums.StringFixed(2)),
 		formatNumber(a.premiums.TotalPremiums.StringFixed(2)))
+
+	// Add fees and close costs if any
+	if !a.premiums.TotalFees.IsZero() || !a.premiums.CloseCosts.IsZero() {
+		premiumText += fmt.Sprintf("  Fees: [red]-$%s[white]", formatNumber(a.premiums.TotalFees.StringFixed(2)))
+		if !a.premiums.CloseCosts.IsZero() {
+			premiumText += fmt.Sprintf("  BuyBack: [red]-$%s[white]", formatNumber(a.premiums.CloseCosts.StringFixed(2)))
+		}
+	}
+
+	// Net P&L
+	netColor := "lime"
+	if a.premiums.NetPL.IsNegative() {
+		netColor = "red"
+	}
+	premiumText += fmt.Sprintf("  Net: [%s]$%s[white]", netColor, formatNumber(a.premiums.NetPL.StringFixed(2)))
 
 	if len(a.options) == 0 {
 		a.timeline.SetText(premiumText + "\n [gray]No active options")

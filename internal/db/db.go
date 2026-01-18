@@ -397,13 +397,16 @@ func (d *DB) AssignOption(ctx context.Context, id string) error {
 }
 
 type PremiumSummary struct {
-	CallPremiums decimal.Decimal
-	PutPremiums  decimal.Decimal
+	CallPremiums  decimal.Decimal
+	PutPremiums   decimal.Decimal
 	TotalPremiums decimal.Decimal
+	TotalFees     decimal.Decimal
+	CloseCosts    decimal.Decimal // Premium paid to close positions early
+	NetPL         decimal.Decimal // Premiums - Fees - Close costs
 }
 
 func (d *DB) GetPremiumsByYear(ctx context.Context, year int) (*PremiumSummary, error) {
-	var callPremiums, putPremiums decimal.Decimal
+	var callPremiums, putPremiums, totalFees, closeCosts decimal.Decimal
 
 	// Get CALL premiums sold
 	err := d.pool.QueryRow(ctx,
@@ -423,9 +426,33 @@ func (d *DB) GetPremiumsByYear(ctx context.Context, year int) (*PremiumSummary, 
 		return nil, err
 	}
 
+	// Get total fees (open_fee + close_fee) for all SELL options
+	err = d.pool.QueryRow(ctx,
+		`SELECT COALESCE(SUM(COALESCE(open_fee, 0) + COALESCE(close_fee, 0)), 0) FROM options
+		 WHERE action = 'SELL'
+		 AND EXTRACT(YEAR FROM created_at) = $1`, year).Scan(&totalFees)
+	if err != nil {
+		return nil, err
+	}
+
+	// Get close costs (premium paid to buy back SELL options)
+	err = d.pool.QueryRow(ctx,
+		`SELECT COALESCE(SUM(close_premium * quantity * 100), 0) FROM options
+		 WHERE action = 'SELL' AND status = 'CLOSED'
+		 AND EXTRACT(YEAR FROM created_at) = $1`, year).Scan(&closeCosts)
+	if err != nil {
+		return nil, err
+	}
+
+	totalPremiums := callPremiums.Add(putPremiums)
+	netPL := totalPremiums.Sub(totalFees).Sub(closeCosts)
+
 	return &PremiumSummary{
 		CallPremiums:  callPremiums,
 		PutPremiums:   putPremiums,
-		TotalPremiums: callPremiums.Add(putPremiums),
+		TotalPremiums: totalPremiums,
+		TotalFees:     totalFees,
+		CloseCosts:    closeCosts,
+		NetPL:         netPL,
 	}, nil
 }
