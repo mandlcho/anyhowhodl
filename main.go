@@ -1048,12 +1048,15 @@ func (a *App) updateExpiryTimeline() {
 		var periodLabel string
 		if a.weeklyView {
 			// Calculate the Friday of each week (options typically expire on Fridays)
-			// Find next Friday from today, then add weeks
-			daysUntilFriday := (5 - int(today.Weekday()) + 7) % 7
-			if daysUntilFriday == 0 {
-				daysUntilFriday = 7 // If today is Friday, show next Friday for week 0
+			// Find this week's Friday (could be in the past if today is Sat/Sun)
+			weekday := int(today.Weekday())
+			var daysToFriday int
+			if weekday <= 5 { // Sun(0) to Fri(5)
+				daysToFriday = 5 - weekday
+			} else { // Saturday(6)
+				daysToFriday = -1 // Yesterday was Friday
 			}
-			fridayDate := today.AddDate(0, 0, daysUntilFriday+(i*7))
+			fridayDate := today.AddDate(0, 0, daysToFriday+(i*7))
 			periodLabel = fridayDate.Format("Jan 02")
 		} else {
 			m := time.Date(today.Year(), today.Month(), 1, 0, 0, 0, 0, time.Local).AddDate(0, i, 0)
