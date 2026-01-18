@@ -36,6 +36,7 @@ type App struct {
 	options         []db.Option
 	quotes          map[string]yahoo.Quote
 	cash            decimal.Decimal
+	totalCost       decimal.Decimal // Total cost basis for return calculations
 	premiums        *db.PremiumSummary
 	focusIndex      int       // 0 = holdings table, 1 = options table
 	lastEscTime     time.Time // For double-ESC to quit
@@ -410,6 +411,9 @@ func (a *App) updateTable() {
 			totalValue = totalValue.Add(costBasis)
 		}
 	}
+
+	// Store totalCost for premium return calculations
+	a.totalCost = totalCost
 
 	// Second pass: populate table with weight %
 	for i, h := range a.holdings {
@@ -1004,6 +1008,30 @@ func (a *App) updateTimeline() {
 		netColor = "red"
 	}
 	premiumText += fmt.Sprintf("  Net: [%s]$%s[white]", netColor, formatNumber(a.premiums.NetPL.StringFixed(2)))
+
+	// Calculate return % and annualized % if we have cost basis
+	if !a.totalCost.IsZero() {
+		returnPct := a.premiums.NetPL.Div(a.totalCost).Mul(decimal.NewFromInt(100))
+
+		// Days elapsed in current year
+		now := time.Now()
+		startOfYear := time.Date(now.Year(), 1, 1, 0, 0, 0, 0, now.Location())
+		daysElapsed := now.Sub(startOfYear).Hours() / 24
+		if daysElapsed < 1 {
+			daysElapsed = 1 // Avoid division by zero on Jan 1
+		}
+
+		// Annualized return
+		annualizedPct := returnPct.Mul(decimal.NewFromFloat(365.0 / daysElapsed))
+
+		returnColor := "lime"
+		if returnPct.IsNegative() {
+			returnColor = "red"
+		}
+		premiumText += fmt.Sprintf("  Return: [%s]%s%%[white]  Ann: [%s]%s%%[white]",
+			returnColor, returnPct.StringFixed(2),
+			returnColor, annualizedPct.StringFixed(2))
+	}
 
 	a.timeline.SetText(premiumText)
 
