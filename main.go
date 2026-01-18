@@ -371,6 +371,20 @@ func (a *App) updateTable() {
 		a.table.SetCell(0, i, cell)
 	}
 
+	// Build map of lowest active SELL CALL strike per ticker (for capping value)
+	callCaps := make(map[string]decimal.Decimal)
+	for _, o := range a.options {
+		if o.Status == "ACTIVE" && o.OptionType == "CALL" && o.Action == "SELL" {
+			if existing, ok := callCaps[o.Ticker]; ok {
+				if o.Strike.LessThan(existing) {
+					callCaps[o.Ticker] = o.Strike
+				}
+			} else {
+				callCaps[o.Ticker] = o.Strike
+			}
+		}
+	}
+
 	// First pass: calculate total portfolio value
 	var totalCost, totalValue decimal.Decimal
 	positionValues := make([]decimal.Decimal, len(a.holdings))
@@ -382,6 +396,12 @@ func (a *App) updateTable() {
 
 		if hasQuote {
 			price := decimal.NewFromFloat(quote.Price)
+
+			// Cap price at call strike if there's an active covered call
+			if cap, hasCap := callCaps[h.Ticker]; hasCap && price.GreaterThan(cap) {
+				price = cap
+			}
+
 			value := h.Quantity.Mul(price)
 			positionValues[i] = value
 			totalValue = totalValue.Add(value)
