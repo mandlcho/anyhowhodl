@@ -324,33 +324,26 @@ func (a *App) refreshData() {
 }
 
 func (a *App) updateLayout() {
-	// Calculate holdings section height:
-	// - Summary bar: 3 rows (with border)
-	// - Table header: 1 row
-	// - Table rows: len(holdings)
-	// - Table border: 2 rows
-	// - Empty space: 1 row
-	holdingsHeight := 3 + 1 + len(a.holdings) + 2 + 1
-	if holdingsHeight < 8 {
-		holdingsHeight = 8 // Minimum height
+	// Calculate exact table height to show all holdings without scrolling
+	// Table needs: header (1) + data rows + top/bottom border (2)
+	tableHeight := len(a.holdings) + 3
+	if tableHeight < 4 {
+		tableHeight = 4 // Minimum: header + border
 	}
 
-	// Rebuild holdings section with fixed table height
-	tableHeight := len(a.holdings) + 3 // rows + header + border
-	if tableHeight < 5 {
-		tableHeight = 5
-	}
+	// Holdings section height: summary (3) + table
+	holdingsHeight := 3 + tableHeight
 
 	a.holdingsSection.Clear()
 	a.holdingsSection.
 		AddItem(a.summary, 3, 0, false).
 		AddItem(a.table, tableHeight, 0, true)
 
-	// Rebuild main flex with fixed holdings height
+	// Rebuild main flex with fixed holdings height, options takes rest
 	a.mainFlex.Clear()
 	a.mainFlex.
 		AddItem(a.createHeader(), 8, 0, false).
-		AddItem(a.holdingsSection, holdingsHeight, 0, true).
+		AddItem(a.holdingsSection, holdingsHeight, 0, false).
 		AddItem(a.optionsSection, 0, 1, false).
 		AddItem(a.statusBar, 1, 0, false)
 }
