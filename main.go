@@ -40,6 +40,9 @@ type App struct {
 	focusIndex      int       // 0 = holdings table, 1 = options table
 	lastEscTime     time.Time // For double-ESC to quit
 	weeklyView      bool      // Toggle between weekly and monthly timeline view
+	lastRefresh     time.Time // Timestamp of last data refresh
+	autoRefresh     bool      // Auto-refresh toggle
+	stopAutoRefresh chan bool // Channel to stop auto-refresh goroutine
 }
 
 func main() {
@@ -62,10 +65,12 @@ func main() {
 	defer database.Close()
 
 	app := &App{
-		db:         database,
-		yahoo:      yahoo.NewClient(),
-		quotes:     make(map[string]yahoo.Quote),
-		weeklyView: true, // Default to weekly view
+		db:              database,
+		yahoo:           yahoo.NewClient(),
+		quotes:          make(map[string]yahoo.Quote),
+		weeklyView:      true,  // Default to weekly view
+		autoRefresh:     true,  // Auto-refresh enabled by default
+		stopAutoRefresh: make(chan bool),
 	}
 
 	app.run()
@@ -231,6 +236,10 @@ func (a *App) run() {
 		case 'r':
 			a.refreshData()
 			return nil
+		case 'R':
+			a.autoRefresh = !a.autoRefresh
+			a.updateStatusBar()
+			return nil
 		case 'w':
 			a.weeklyView = !a.weeklyView
 			a.updateTimeline()
@@ -242,8 +251,29 @@ func (a *App) run() {
 	// Initial data load
 	a.refreshData()
 
+	// Start auto-refresh goroutine (30 second interval)
+	go a.autoRefreshLoop(30 * time.Second)
+
 	if err := a.app.SetRoot(a.pages, true).EnableMouse(true).Run(); err != nil {
 		panic(err)
+	}
+}
+
+func (a *App) autoRefreshLoop(interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			if a.autoRefresh {
+				a.app.QueueUpdateDraw(func() {
+					a.refreshData()
+				})
+			}
+		case <-a.stopAutoRefresh:
+			return
+		}
 	}
 }
 
@@ -325,7 +355,17 @@ func (a *App) refreshData() {
 	a.updateOptionsTable()
 	a.updateTimeline()
 	a.updateLayout()
-	a.statusBar.SetText(" [yellow]a[white]:Add Holding  [yellow]o[white]:Add Option  [yellow]c[white]:Cash  [yellow]Tab[white]:Switch  [yellow]d[white]:Delete  [yellow]r[white]:Refresh  [yellow]w[white]:Week/Month  [yellow]q[white]:Quit")
+	a.lastRefresh = time.Now()
+	a.updateStatusBar()
+}
+
+func (a *App) updateStatusBar() {
+	refreshTime := a.lastRefresh.Format("15:04:05")
+	autoStatus := "[red]OFF"
+	if a.autoRefresh {
+		autoStatus = "[lime]ON"
+	}
+	a.statusBar.SetText(fmt.Sprintf(" [gray]Updated %s[white] | [yellow]Auto[white]:%s[white] | [yellow]a[white]:Add  [yellow]o[white]:Option  [yellow]c[white]:Cash  [yellow]Tab[white]:Switch  [yellow]d[white]:Del  [yellow]r[white]:Refresh  [yellow]R[white]:Auto  [yellow]w[white]:View  [yellow]q[white]:Quit", refreshTime, autoStatus))
 }
 
 func (a *App) updateLayout() {
