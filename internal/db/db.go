@@ -63,7 +63,45 @@ func (d *DB) Close() {
 }
 
 func (d *DB) AddHolding(ctx context.Context, ticker string, quantity, avgCost decimal.Decimal, entryDate time.Time, targetPrice decimal.NullDecimal, notes string) error {
-	_, err := d.pool.Exec(ctx,
+	existing, err := d.GetHoldingByTicker(ctx, ticker)
+	if err != nil {
+		return err
+	}
+
+	totalCost := quantity.Mul(avgCost)
+
+	currentCash, err := d.GetAvailableCash(ctx)
+	if err != nil {
+		currentCash = decimal.Zero
+	}
+	currentCash = currentCash.Sub(totalCost)
+	if err := d.SetAvailableCash(ctx, currentCash); err != nil {
+		return err
+	}
+
+	if existing != nil {
+		totalShares := existing.Quantity.Add(quantity)
+		totalValue := existing.Quantity.Mul(existing.AvgCost).Add(quantity.Mul(avgCost))
+		newAvgCost := totalValue.Div(totalShares)
+
+		mergedNotes := existing.Notes
+		if notes != "" {
+			if mergedNotes != "" {
+				mergedNotes = mergedNotes + "; " + notes
+			} else {
+				mergedNotes = notes
+			}
+		}
+
+		newTargetPrice := existing.TargetPrice
+		if targetPrice.Valid {
+			newTargetPrice = targetPrice
+		}
+
+		return d.UpdateHolding(ctx, existing.ID, totalShares, newAvgCost, newTargetPrice, mergedNotes)
+	}
+
+	_, err = d.pool.Exec(ctx,
 		`INSERT INTO holdings (ticker, quantity, avg_cost, entry_date, target_price, notes) VALUES ($1, $2, $3, $4, $5, $6)`,
 		ticker, quantity, avgCost, entryDate, targetPrice, notes)
 	return err
@@ -397,13 +435,13 @@ func (d *DB) AssignOption(ctx context.Context, id string) error {
 }
 
 type PremiumSummary struct {
-	CallPremiums    decimal.Decimal
-	PutPremiums     decimal.Decimal
-	TotalPremiums   decimal.Decimal
-	TotalFees       decimal.Decimal
-	CloseCosts      decimal.Decimal // Premium paid to close positions early
-	NetPL           decimal.Decimal // Premiums - Fees - Close costs
-	CapitalAtRisk   decimal.Decimal // Total notional (strike × 100 × qty) for RoR calc
+	CallPremiums  decimal.Decimal
+	PutPremiums   decimal.Decimal
+	TotalPremiums decimal.Decimal
+	TotalFees     decimal.Decimal
+	CloseCosts    decimal.Decimal // Premium paid to close positions early
+	NetPL         decimal.Decimal // Premiums - Fees - Close costs
+	CapitalAtRisk decimal.Decimal // Total notional (strike × 100 × qty) for RoR calc
 }
 
 func (d *DB) GetPremiumsByYear(ctx context.Context, year int) (*PremiumSummary, error) {
@@ -458,12 +496,12 @@ func (d *DB) GetPremiumsByYear(ctx context.Context, year int) (*PremiumSummary, 
 	netPL := totalPremiums.Sub(totalFees).Sub(closeCosts)
 
 	return &PremiumSummary{
-		CallPremiums:    callPremiums,
-		PutPremiums:     putPremiums,
-		TotalPremiums:   totalPremiums,
-		TotalFees:       totalFees,
-		CloseCosts:      closeCosts,
-		NetPL:           netPL,
-		CapitalAtRisk:   capitalAtRisk,
+		CallPremiums:  callPremiums,
+		PutPremiums:   putPremiums,
+		TotalPremiums: totalPremiums,
+		TotalFees:     totalFees,
+		CloseCosts:    closeCosts,
+		NetPL:         netPL,
+		CapitalAtRisk: capitalAtRisk,
 	}, nil
 }
