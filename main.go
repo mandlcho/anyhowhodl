@@ -43,6 +43,7 @@ type App struct {
 	lastRefresh     time.Time // Timestamp of last data refresh
 	autoRefresh     bool      // Auto-refresh toggle
 	stopAutoRefresh chan bool // Channel to stop auto-refresh goroutine
+	showExpired     bool      // Show expired options toggle
 }
 
 func main() {
@@ -71,6 +72,7 @@ func main() {
 		weeklyView:      true,  // Default to weekly view
 		autoRefresh:     true,  // Auto-refresh enabled by default
 		stopAutoRefresh: make(chan bool),
+		showExpired:     true,  // Show expired options by default
 	}
 
 	app.run()
@@ -244,6 +246,11 @@ func (a *App) run() {
 			a.weeklyView = !a.weeklyView
 			a.updateTimeline()
 			return nil
+		case 'e':
+			a.showExpired = !a.showExpired
+			a.updateOptionsTable()
+			a.updateStatusBar()
+			return nil
 		}
 		return event
 	})
@@ -365,7 +372,11 @@ func (a *App) updateStatusBar() {
 	if a.autoRefresh {
 		autoStatus = "[lime]ON"
 	}
-	a.statusBar.SetText(fmt.Sprintf(" [gray]Updated %s[white] | [yellow]Auto[white]:%s[white] | [yellow]a[white]:Add  [yellow]o[white]:Option  [yellow]c[white]:Cash  [yellow]Tab[white]:Switch  [yellow]d[white]:Del  [yellow]r[white]:Refresh  [yellow]R[white]:Auto  [yellow]w[white]:View  [yellow]q[white]:Quit", refreshTime, autoStatus))
+	expiredStatus := "[red]OFF"
+	if a.showExpired {
+		expiredStatus = "[lime]ON"
+	}
+	a.statusBar.SetText(fmt.Sprintf(" [gray]Updated %s[white] | [yellow]Auto[white]:%s | [yellow]Expired[white]:%s | [yellow]a[white]:Add  [yellow]o[white]:Option  [yellow]c[white]:Cash  [yellow]Tab[white]:Switch  [yellow]d[white]:Del  [yellow]r[white]:Refresh  [yellow]R[white]:Auto  [yellow]e[white]:Expired  [yellow]w[white]:View  [yellow]q[white]:Quit", refreshTime, autoStatus, expiredStatus))
 }
 
 func (a *App) updateLayout() {
@@ -921,8 +932,13 @@ func (a *App) updateOptionsTable() {
 
 	today := time.Now().Truncate(24 * time.Hour)
 
-	for i, o := range a.options {
-		row := i + 1
+	row := 0
+	for _, o := range a.options {
+		// Skip expired options if toggle is off
+		if !a.showExpired && o.Status == "EXPIRED" {
+			continue
+		}
+		row++
 		rowBg := tcell.ColorBlack
 
 		// Dim colors for non-active options
