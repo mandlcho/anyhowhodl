@@ -35,9 +35,18 @@ Build a "Cash-Secured Put Advisor" — a separate TUI tab that analyzes whether 
 - VIX available via `^VIX` ticker through existing fetchQuote
 - Existing yahoo package uses `float64` (not decimal) — follow this pattern for calculations
 
+**Repo Analysis Findings** (from alangshur/put-options-scanner, fanzhenya/options_lab, devsinvest/CashSecuredPuts):
+- **Bid/ask spread filter is critical** — CashSecuredPuts uses 15% max. Without it, illiquid options get recommended.
+- **Delta filtering** — put-options-scanner targets 0.3-0.5, CashSecuredPuts caps at -0.20. Prevents picking strikes too far OTM or ITM.
+- **Min volume/OI** — all 3 repos filter on this. Minimum 10 each.
+- **DTE sweet spot** — put-options-scanner found 14-30 days optimal. Widened our window to 21-45.
+- **ARR (Annualized Return Rate)** — options_lab's primary metric matches our Premium Yield signal.
+- **Delta can be approximated** — B-S put delta is ~10 lines of Go (no library needed). Yahoo doesn't provide delta.
+- **Probability of ITM** — put-options-scanner uses this heavily. Deferred to V2.
+
 ### Metis Review
 **Identified Gaps** (addressed):
-- **Strike/expiry selection**: Fixed to nearest ATM put, 30-45 DTE. No user selection V1.
+- **Strike/expiry selection**: Fixed to nearest ATM put, 21-45 DTE (widened from 30-45 based on put-options-scanner finding 14-30 optimal). No user selection V1.
 - **CSP watchlist vs holdings**: Watchlist is independent — user can watch tickers they don't own.
 - **IV computation**: Use Yahoo's `impliedVolatility` field from options chain (no Black-Scholes needed). Task 1 verifies this field exists.
 - **Data staleness**: Manual refresh only (triggered with existing `r` key when on CSP tab). No separate auto-refresh V1.
@@ -77,10 +86,10 @@ Add a CSP Advisor tab that shows a scored recommendation (0-100) for selling cas
 
 ### Must NOT Have (Guardrails)
 - NO more than 5 signals in the composite score
-- NO Black-Scholes implementation (use Yahoo's IV field)
+- NO full Black-Scholes pricing (use Yahoo's IV field). Only B-S delta formula (~10 lines) for contract filtering.
 - NO historical signal storage or backtesting
 - NO full options chain display (only computed metrics)
-- NO strike/expiry selection UI (fixed logic: nearest ATM, 30-45 DTE)
+- NO strike/expiry selection UI (fixed logic: nearest ATM, 21-45 DTE)
 - NO alerts or notifications
 - NO refactoring of existing main.go structure, App struct, or keybindings
 - NO new Go dependencies beyond what's already in go.mod
@@ -120,11 +129,38 @@ const (
 // Premium Yield: 0%→0pts, 15%→50pts, 30%→100pts (annualized, linear)
 ```
 
+### Contract Quality Filters (from repo analysis)
+
+> Learned from alangshur/put-options-scanner, fanzhenya/options_lab, devsinvest/CashSecuredPuts.
+> Contracts that fail ANY filter are excluded before scoring.
+
+```go
+const (
+    MinVolume        = 10    // Minimum contract volume (options_lab uses 10)
+    MinOpenInterest  = 10    // Minimum open interest
+    MaxBidAskSpread  = 0.15  // 15% max spread — critical for execution (CashSecuredPuts)
+    MinBidPrice      = 0.10  // $0.10 floor — avoid garbage contracts (put-options-scanner)
+    MaxDelta         = -0.20 // Delta cap — conservative OTM only (CashSecuredPuts: -0.20)
+    MinDelta         = -0.50 // Delta floor — not too deep ITM (put-options-scanner: 0.3-0.5)
+)
+```
+
+**Bid/Ask Spread Filter**: `(ask - bid) / mid > MaxBidAskSpread` → reject.
+Without this, we might recommend options that can't be executed at displayed prices.
+
+**Delta Filter**: Yahoo options chain includes `impliedVolatility` but NOT delta.
+Delta approximation: use Black-Scholes delta = -N(-d1) for puts, where:
+- d1 = (ln(S/K) + (r + σ²/2)·t) / (σ·√t)
+- S = underlying price, K = strike, σ = IV, t = DTE/365, r ≈ 0.05
+- This is a simple formula (no library needed), ~10 lines of Go code.
+
 ### Strike/Expiry Selection Logic (locked)
 1. Get options chain for ticker
-2. Filter expiry dates to 30-45 DTE window (pick closest to 35 DTE)
-3. Find put strike closest to current price (nearest ATM)
-4. Use that contract's premium and IV for calculations
+2. Filter expiry dates to 21-45 DTE window (pick closest to 30 DTE)
+3. Apply contract quality filters (volume, OI, spread, bid, delta)
+4. From surviving contracts, find put strike closest to current price (nearest ATM)
+5. Use that contract's premium and IV for calculations
+6. If no contracts survive filtering → show "N/A" for ticker
 
 ---
 
@@ -247,7 +283,11 @@ Wave 2 (After Wave 1):
   - `TestCalculateRSIInsufficientData`: < 15 data points → returns NaN
   - `TestCalculateIVRank`: currentIV=30, lowIV=20, highIV=40 → rank 50
   - `TestCalculateIVRankZeroRange`: highIV == lowIV → returns NaN
-  - `TestSelectTargetContract`: given options chain data, selects nearest ATM put in 30-45 DTE window
+  - `TestSelectTargetContract`: given options chain data, selects nearest ATM put in 21-45 DTE window
+  - `TestFilterContracts`: filters by volume≥10, OI≥10, bid≥0.10, spread≤15%, delta in [-0.50, -0.20]
+  - `TestFilterContractsAllRejected`: all contracts fail filters → returns nil
+  - `TestCalculateDelta`: known S/K/IV/DTE → expected delta (validated against online B-S calculator)
+  - `TestBidAskSpreadFilter`: (ask-bid)/mid > 0.15 → rejected
 
   **GREEN phase** — implement in `internal/csp/csp.go`:
   ```go
@@ -294,6 +334,17 @@ Wave 2 (After Wave 1):
       Signal            string  // "STRONG", "MODERATE", "WEAK"
   }
 
+  // Contract quality filter constants (from repo analysis)
+  const (
+      MinVolume       = 10
+      MinOpenInterest = 10
+      MaxBidAskSpread = 0.15  // 15% max (ask-bid)/mid
+      MinBidPrice     = 0.10  // $0.10 floor
+      MaxDelta        = -0.20 // conservative OTM cap
+      MinDelta        = -0.50 // not too deep ITM
+      RiskFreeRate    = 0.05  // approximate, for delta calc
+  )
+
   // OptionContract represents a single option from the chain
   type OptionContract struct {
       Strike           float64
@@ -303,7 +354,8 @@ Wave 2 (After Wave 1):
       Volume           int
       OpenInterest     int
       ImpliedVolatility float64
-      Expiration       int64 // Unix timestamp
+      Expiration       int64   // Unix timestamp
+      Delta            float64 // Computed via B-S approximation
   }
 
   // OptionsData holds the parsed options chain for a ticker
@@ -323,6 +375,8 @@ Wave 2 (After Wave 1):
   func CalculateRSI(closes []float64) float64 { ... }
   func CalculateIVRank(current, low52w, high52w float64) float64 { ... }
   func CalculatePremiumYield(premium, strike float64, dte int) float64 { ... }
+  func CalculateDelta(S, K, iv float64, dte int) float64 { ... } // B-S put delta: -N(-d1)
+  func FilterContracts(contracts []OptionContract, underlyingPrice float64) []OptionContract { ... }
   func SelectTargetContract(chain OptionsData) *OptionContract { ... }
   ```
 
@@ -619,13 +673,16 @@ Wave 2 (After Wave 1):
   ```
 
   **CSP Table columns**:
-  `| TICKER | PRICE | CSP SCORE | VIX | IV RANK | RSI | P/C RATIO | YIELD | SIGNAL |`
+  `| TICKER | PRICE | STRIKE | DTE | DELTA | CSP SCORE | VIX | IV RANK | RSI | P/C | YIELD | SIGNAL |`
 
   - TICKER: magenta (matching existing style)
-  - PRICE: cyan
+  - PRICE/STRIKE: cyan
+  - DTE: white
+  - DELTA: white (shows selected contract's delta, e.g. -0.28)
   - CSP SCORE: color-coded (>70 lime, 50-70 yellow, <50 red)
-  - VIX/IV RANK/RSI/P/C RATIO/YIELD: white, raw values
+  - VIX/IV RANK/RSI/P/C/YIELD: white, raw values
   - SIGNAL: "STRONG" (lime), "MODERATE" (yellow), "WEAK" (red)
+  - If no qualifying contracts: show "NO CONTRACTS" in dim gray
 
   **Changes to `main.go`** (minimal):
   1. Add fields to `App` struct:
