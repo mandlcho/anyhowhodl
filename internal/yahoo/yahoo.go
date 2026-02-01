@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/http/cookiejar"
 	"sync"
 	"time"
 )
@@ -37,6 +38,8 @@ type chartResponse struct {
 
 type Client struct {
 	httpClient *http.Client
+	cookieJar  *cookiejar.Jar
+	crumb      string
 }
 
 func NewClient() *Client {

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"anyhowhodl/internal/csp"
 	"anyhowhodl/internal/db"
 	"anyhowhodl/internal/yahoo"
 
@@ -44,6 +45,14 @@ type App struct {
 	autoRefresh     bool      // Auto-refresh toggle
 	stopAutoRefresh chan bool // Channel to stop auto-refresh goroutine
 	showExpired     bool      // Show expired options toggle
+	// CSP Advisor fields
+	cspTable        *tview.Table
+	cspStatusBar    *tview.TextView
+	cspSection      *tview.Flex
+	cspWatchlist    []db.CSPWatchItem
+	cspScores       map[string]csp.SignalOutput
+	cspContractInfo map[string]ContractInfo
+	showCSP         bool // Toggle CSP view visibility
 }
 
 func main() {
@@ -163,6 +172,9 @@ func (a *App) run() {
 		AddItem(a.optionsSection, 0, 2, false).
 		AddItem(a.statusBar, 1, 0, false)
 
+	// Initialize CSP view
+	a.initCSPView()
+
 	a.pages = tview.NewPages().
 		AddPage("main", a.mainFlex, true, true)
 
@@ -213,17 +225,49 @@ func (a *App) run() {
 		case 'q':
 			a.app.Stop()
 			return nil
+		case 'p':
+			// Toggle CSP view
+			a.showCSP = !a.showCSP
+			if a.showCSP {
+				// Switch to CSP view
+				cspLayout := tview.NewFlex().
+					SetDirection(tview.FlexRow).
+					AddItem(a.header, 8, 0, false).
+					AddItem(a.cspSection, 0, 1, true)
+				a.pages.RemovePage("main")
+				a.pages.AddPage("main", cspLayout, true, true)
+				a.app.SetFocus(a.cspTable)
+			} else {
+				// Switch back to normal view
+				a.pages.RemovePage("main")
+				a.pages.AddPage("main", a.mainFlex, true, true)
+				a.app.SetFocus(a.table)
+			}
+			return nil
 		case 'a':
-			a.showAddForm()
+			if a.showCSP {
+				a.showAddCSPWatchForm()
+			} else {
+				a.showAddForm()
+			}
 			return nil
 		case 'o':
-			a.showAddOptionForm()
+			if !a.showCSP {
+				a.showAddOptionForm()
+			}
 			return nil
 		case 'c':
-			a.showCashForm()
+			if !a.showCSP {
+				a.showCashForm()
+			}
 			return nil
 		case 'd':
-			if a.focusIndex == 0 {
+			if a.showCSP {
+				row, _ := a.cspTable.GetSelection()
+				if row > 0 && row <= len(a.cspWatchlist) {
+					a.showRemoveCSPWatchConfirm(row - 1)
+				}
+			} else if a.focusIndex == 0 {
 				row, _ := a.table.GetSelection()
 				if row > 0 && row <= len(a.holdings) {
 					a.confirmDelete(row - 1)
@@ -236,20 +280,30 @@ func (a *App) run() {
 			}
 			return nil
 		case 'r':
-			a.refreshData()
+			if a.showCSP {
+				a.refreshCSPData()
+			} else {
+				a.refreshData()
+			}
 			return nil
 		case 'R':
-			a.autoRefresh = !a.autoRefresh
-			a.updateStatusBar()
+			if !a.showCSP {
+				a.autoRefresh = !a.autoRefresh
+				a.updateStatusBar()
+			}
 			return nil
 		case 'w':
-			a.weeklyView = !a.weeklyView
-			a.updateTimeline()
+			if !a.showCSP {
+				a.weeklyView = !a.weeklyView
+				a.updateTimeline()
+			}
 			return nil
 		case 'e':
-			a.showExpired = !a.showExpired
-			a.updateOptionsTable()
-			a.updateStatusBar()
+			if !a.showCSP {
+				a.showExpired = !a.showExpired
+				a.updateOptionsTable()
+				a.updateStatusBar()
+			}
 			return nil
 		}
 		return event
