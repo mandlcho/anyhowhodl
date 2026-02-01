@@ -142,7 +142,7 @@ func (a *App) run() {
 	// Status bar
 	a.statusBar = tview.NewTextView().
 		SetDynamicColors(true).
-		SetText(" [yellow]a[white]:Add Holding  [yellow]o[white]:Add Option  [yellow]c[white]:Cash  [yellow]Tab[white]:Switch  [yellow]d[white]:Delete  [yellow]r[white]:Refresh  [yellow]w[white]:Week/Month  [yellow]q[white]:Quit")
+		SetText(" [yellow]a[white]:Add Holding  [yellow]o[white]:Add Option  [yellow]c[white]:Cash  [yellow]p[white]:CSP Advisor  [yellow]Tab[white]:Switch  [yellow]d[white]:Delete  [yellow]r[white]:Refresh  [yellow]w[white]:Week/Month  [yellow]q[white]:Quit")
 
 	// Summary bar (portfolio totals)
 	a.summary = tview.NewTextView().SetDynamicColors(true)
@@ -430,7 +430,7 @@ func (a *App) updateStatusBar() {
 	if a.showExpired {
 		expiredStatus = "[lime]ON"
 	}
-	a.statusBar.SetText(fmt.Sprintf(" [gray]Updated %s[white] | [yellow]Auto[white]:%s | [yellow]Expired[white]:%s | [yellow]a[white]:Add  [yellow]o[white]:Option  [yellow]c[white]:Cash  [yellow]Tab[white]:Switch  [yellow]d[white]:Del  [yellow]r[white]:Refresh  [yellow]R[white]:Auto  [yellow]e[white]:Expired  [yellow]w[white]:View  [yellow]q[white]:Quit", refreshTime, autoStatus, expiredStatus))
+	a.statusBar.SetText(fmt.Sprintf(" [gray]Updated %s[white] | [yellow]Auto[white]:%s | [yellow]Expired[white]:%s | [yellow]a[white]:Add  [yellow]o[white]:Option  [yellow]c[white]:Cash  [yellow]p[white]:CSP  [yellow]Tab[white]:Switch  [yellow]d[white]:Del  [yellow]r[white]:Refresh  [yellow]R[white]:Auto  [yellow]e[white]:Expired  [yellow]w[white]:View  [yellow]q[white]:Quit", refreshTime, autoStatus, expiredStatus))
 }
 
 func (a *App) updateLayout() {
