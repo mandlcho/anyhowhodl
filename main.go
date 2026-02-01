@@ -237,6 +237,8 @@ func (a *App) run() {
 				a.pages.RemovePage("main")
 				a.pages.AddPage("main", cspLayout, true, true)
 				a.app.SetFocus(a.cspTable)
+				// Initialize CSP data
+				go a.refreshCSPData()
 			} else {
 				// Switch back to normal view
 				a.pages.RemovePage("main")
